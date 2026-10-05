@@ -1,0 +1,268 @@
+[
+  {
+    "_id": "q_buzzer_1",
+    "roundType": "BUZZER",
+    "order": 1,
+    "questionText": "What is the primary protocol that enables full-duplex, bi-directional real-time communication between browser and server?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "HTTP/1.1 Short Polling" },
+      { "label": "B", "text": "WebSocket Protocol" },
+      { "label": "C", "text": "FTP Data Tunnel" },
+      { "label": "D", "text": "SMTP Mail Socket" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 10,
+    "negativePoints": 5,
+    "timeLimitSeconds": 30,
+    "explanation": "WebSockets provide persistent, low-latency, full-duplex communication over a single TCP connection."
+  },
+  {
+    "_id": "q_buzzer_2",
+    "roundType": "BUZZER",
+    "order": 2,
+    "questionText": "In React 18, which core architectural mechanism allows non-blocking UI rendering and interruptible state transitions?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "Concurrent Rendering" },
+      { "label": "B", "text": "Virtual DOM Freeze" },
+      { "label": "C", "text": "Synchronous Fiber Loop" },
+      { "label": "D", "text": "DOM Mutation Observer" }
+    ],
+    "correctOptionIndex": 0,
+    "points": 10,
+    "negativePoints": 5,
+    "timeLimitSeconds": 30,
+    "explanation": "Concurrent rendering in React 18 allows React to pause, interrupt, or resume renders to keep the UI responsive."
+  },
+  {
+    "_id": "q_buzzer_3",
+    "roundType": "BUZZER",
+    "order": 3,
+    "questionText": "Which CSS property provides optimal hardware acceleration for smooth 60 FPS animations on large displays?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "margin-left and top" },
+      { "label": "B", "text": "transform: translate3d()" },
+      { "label": "C", "text": "float: left with clear" },
+      { "label": "D", "text": "position: absolute" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 10,
+    "negativePoints": 5,
+    "timeLimitSeconds": 30,
+    "explanation": "translate3d triggers GPU compositing, bypassing costly browser repaint and reflow cycles."
+  },
+  {
+    "_id": "q_buzzer_4",
+    "roundType": "BUZZER",
+    "order": 4,
+    "questionText": "What is the default port number used by MongoDB service on localhost?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "3000" },
+      { "label": "B", "text": "5432" },
+      { "label": "C", "text": "27017" },
+      { "label": "D", "text": "8080" }
+    ],
+    "correctOptionIndex": 2,
+    "points": 10,
+    "negativePoints": 5,
+    "timeLimitSeconds": 30,
+    "explanation": "MongoDB listens on port 27017 by default."
+  },
+  {
+    "_id": "q_buzzer_5",
+    "roundType": "BUZZER",
+    "order": 5,
+    "questionText": "In JavaScript, what mechanism monitors the Call Stack and moves tasks from the Callback Queue into the Call Stack when empty?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "Thread Allocator" },
+      { "label": "B", "text": "Garbage Collector" },
+      { "label": "C", "text": "The Event Loop" },
+      { "label": "D", "text": "JIT Optimizer" }
+    ],
+    "correctOptionIndex": 2,
+    "points": 10,
+    "negativePoints": 5,
+    "timeLimitSeconds": 30,
+    "explanation": "The Event Loop continuously checks if the call stack is empty before pushing queued callbacks."
+  },
+  {
+    "_id": "q_av_1",
+    "roundType": "AUDIO_VISUAL",
+    "order": 1,
+    "questionText": "Watch the video presentation: Which pioneering browser was the birthplace of JavaScript in May 1995?",
+    "mediaType": "VIDEO",
+    "mediaUrl": "/media/tech_history.mp4",
+    "options": [
+      { "label": "A", "text": "Internet Explorer 1.0" },
+      { "label": "B", "text": "Netscape Navigator" },
+      { "label": "C", "text": "Mosaic Web Client" },
+      { "label": "D", "text": "Opera Browser" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 15,
+    "negativePoints": 0,
+    "timeLimitSeconds": 45,
+    "explanation": "Brendan Eich created JavaScript in 10 days at Netscape in 1995."
+  },
+  {
+    "_id": "q_av_2",
+    "roundType": "AUDIO_VISUAL",
+    "order": 2,
+    "questionText": "Listen to the audio clip: What was the name of the first computer worm distributed over ARPANET in 1988?",
+    "mediaType": "AUDIO",
+    "mediaUrl": "/media/retro_beeps.mp3",
+    "options": [
+      { "label": "A", "text": "ILOVEYOU Worm" },
+      { "label": "B", "text": "Morris Worm" },
+      { "label": "C", "text": "Creeper Virus" },
+      { "label": "D", "text": "Stuxnet Malware" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 15,
+    "negativePoints": 0,
+    "timeLimitSeconds": 45,
+    "explanation": "Robert Tappan Morris released the Morris worm on November 2, 1988."
+  },
+  {
+    "_id": "q_rf_1",
+    "roundType": "RAPID_FIRE",
+    "order": 1,
+    "questionText": "What does HTML stand for?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "HyperText Markup Language" },
+      { "label": "B", "text": "High Tech Modern Language" },
+      { "label": "C", "text": "Hyper Transfer Machine Link" },
+      { "label": "D", "text": "Home Tooling Mark Layer" }
+    ],
+    "correctOptionIndex": 0,
+    "points": 1,
+    "negativePoints": 0,
+    "timeLimitSeconds": 10,
+    "explanation": "HyperText Markup Language"
+  },
+  {
+    "_id": "q_rf_2",
+    "roundType": "RAPID_FIRE",
+    "order": 2,
+    "questionText": "Which data structure operates on a First-In First-Out (FIFO) basis?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "Stack" },
+      { "label": "B", "text": "Queue" },
+      { "label": "C", "text": "Binary Heap" },
+      { "label": "D", "text": "Hash Map" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 1,
+    "negativePoints": 0,
+    "timeLimitSeconds": 10,
+    "explanation": "Queues follow FIFO order."
+  },
+  {
+    "_id": "q_rf_3",
+    "roundType": "RAPID_FIRE",
+    "order": 3,
+    "questionText": "What is the average time complexity of a key lookup in a Hash Table?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "O(1)" },
+      { "label": "B", "text": "O(log n)" },
+      { "label": "C", "text": "O(n)" },
+      { "label": "D", "text": "O(n²)" }
+    ],
+    "correctOptionIndex": 0,
+    "points": 1,
+    "negativePoints": 0,
+    "timeLimitSeconds": 10,
+    "explanation": "Hash tables offer average O(1) constant time lookup."
+  },
+  {
+    "_id": "q_rf_4",
+    "roundType": "RAPID_FIRE",
+    "order": 4,
+    "questionText": "In Git, which command creates and switches to a new branch simultaneously?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "git checkout -b <name>" },
+      { "label": "B", "text": "git branch --new" },
+      { "label": "C", "text": "git switch --all" },
+      { "label": "D", "text": "git push -b" }
+    ],
+    "correctOptionIndex": 0,
+    "points": 1,
+    "negativePoints": 0,
+    "timeLimitSeconds": 10,
+    "explanation": "git checkout -b creates and checks out the new branch."
+  },
+  {
+    "_id": "q_rf_5",
+    "roundType": "RAPID_FIRE",
+    "order": 5,
+    "questionText": "Which HTTP status code signifies successful deletion with 'No Content' returned?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "200 OK" },
+      { "label": "B", "text": "201 Created" },
+      { "label": "C", "text": "204 No Content" },
+      { "label": "D", "text": "404 Not Found" }
+    ],
+    "correctOptionIndex": 2,
+    "points": 1,
+    "negativePoints": 0,
+    "timeLimitSeconds": 10,
+    "explanation": "204 signifies successful request with no response body."
+  },
+  {
+    "_id": "q_rf_6",
+    "roundType": "RAPID_FIRE",
+    "order": 6,
+    "questionText": "How many bits are in a standard IPv4 address?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "16 bits" },
+      { "label": "B", "text": "32 bits" },
+      { "label": "C", "text": "64 bits" },
+      { "label": "D", "text": "128 bits" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 1,
+    "negativePoints": 0,
+    "timeLimitSeconds": 10,
+    "explanation": "IPv4 uses 32-bit addresses."
+  },
+  {
+    "_id": "q_rf_7",
+    "roundType": "RAPID_FIRE",
+    "order": 7,
+    "questionText": "What JavaScript runtime engine powers Node.js and Google Chrome?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "SpiderMonkey" },
+      { "label": "B", "text": "JavaScriptCore" },
+      { "label": "C", "text": "V8 Engine" },
+      { "label": "D", "text": "Chakra" }
+    ],
+    "correctOptionIndex": 2,
+    "points": 1,
+    "negativePoints": 0,
+    "timeLimitSeconds": 10,
+    "explanation": "V8 is Google's open source high-performance JavaScript and WebAssembly engine."
+  }
+]

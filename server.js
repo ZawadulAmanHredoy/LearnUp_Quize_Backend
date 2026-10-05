@@ -12,6 +12,7 @@ const apiRoutes = require('./routes/api.routes');
 const errorHandler = require('./middleware/errorHandler');
 const AppError = require('./utils/appError');
 
+const path = require('path');
 const app = express();
 const server = http.createServer(app);
 
@@ -19,6 +20,10 @@ const server = http.createServer(app);
 app.use(helmet({
   contentSecurityPolicy: false // Allows easy integration with dev tools and socket.io
 }));
+
+// Static media and assets
+app.use(express.static(path.join(__dirname, 'public')));
+app.use('/media', express.static(path.join(__dirname, 'public/media')));
 
 const allowedOrigins = [
   process.env.CLIENT_URL || 'http://localhost:5173',
