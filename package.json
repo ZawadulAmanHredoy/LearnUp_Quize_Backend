@@ -1,0 +1,32 @@
+{
+  "name": "learnup-quiz-backend",
+  "version": "1.0.0",
+  "description": "Backend API and Real-time Socket.IO Server for LearnUp Quiz",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "helmet": "^7.1.0",
+    "mongoose": "^8.3.1",
+    "morgan": "^1.10.0",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "keywords": [
+    "express",
+    "socketio",
+    "mongodb",
+    "quiz",
+    "learnup"
+  ],
+  "author": "sheikh-sa-kib",
+  "license": "MIT"
+}
