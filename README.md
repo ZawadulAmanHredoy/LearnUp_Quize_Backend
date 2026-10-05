@@ -41,6 +41,30 @@ npm test
 ```
 Covers admin-only access, answer-key hiding, the 10-phone simultaneous buzz (exactly one winner), single-device sessions, server-side scoring, rapid fire, crash recovery of the live state, and tie detection.
 
+## Audio-Visual Round Media
+All clips live in **`public/media/`** in this repo and are served at `http://<server>:5000/media/<file>`. The projector loads them from there, so adding a clip never needs a frontend change.
+
+To add a clip:
+1. Copy the file into `public/media/`, e.g. `public/media/flag_quiz.mp4`. Use simple file names (no spaces).
+2. Reference it in `data/questions.json`:
+   ```json
+   {
+     "roundType": "AUDIO_VISUAL",
+     "order": 3,
+     "questionText": "Which country's anthem is this?",
+     "mediaType": "AUDIO",
+     "mediaUrl": "/media/flag_quiz.mp3",
+     "options": [{ "label": "A", "text": "..." }, { "label": "B", "text": "..." }, { "label": "C", "text": "..." }, { "label": "D", "text": "..." }],
+     "correctOptionIndex": 1,
+     "points": 15,
+     "negativePoints": 0
+   }
+   ```
+   `mediaType` is `VIDEO`, `AUDIO` or `IMAGE`. A full `https://...` URL also works, but needs internet at the venue.
+3. Restart the server. It logs a warning for any question whose file is missing, the admin's AV deck marks it **⚠ file missing**, and `npm test` fails until the file is there.
+
+Formats: **MP4 (H.264 + AAC)** or **WebM** for video, **MP3** for audio, JPG/PNG/WebP for images. Play the projector in Chrome or Edge. Keep each file well under 100 MB (GitHub's per-file limit); for larger clips use Git LFS or copy them onto the event laptop directly.
+
 ## Security Model
 - **Admin** REST routes (`/questions`, `/event/*`, team writes) require `Authorization: Bearer <admin token>`. Admin socket events are ignored unless the socket joined `room:admin` with a valid admin token.
 - **Teams** join with their login token; the server checks it against the team's current session. A new login on another phone disconnects the old one. The buzzing team is taken from the verified session, never from the message.

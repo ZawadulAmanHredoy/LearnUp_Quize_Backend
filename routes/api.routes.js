@@ -1,5 +1,6 @@
 const express = require('express');
 const healthRoutes = require('./health.routes');
+const mediaRoutes = require('./media.routes');
 const quizRoutes = require('./quiz.routes');
 const authRoutes = require('./auth.routes');
 const questionRoutes = require('./question.routes');
@@ -13,6 +14,7 @@ router.use('/auth', authRoutes);
 router.use('/questions', questionRoutes);
 router.use('/teams', teamRoutes);
 router.use('/event', eventRoutes);
+router.use('/media', mediaRoutes);
 router.use('/quizzes', quizRoutes); // Backwards compatibility
 
 module.exports = router;

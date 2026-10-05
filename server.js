@@ -9,6 +9,7 @@ const mongoose = require('mongoose');
 const connectDB = require('./config/db');
 const { initSocket, hydrateRealtimeState } = require('./config/socket');
 const store = require('./utils/store');
+const { MEDIA_DIR, findMissingMedia } = require('./utils/media');
 const apiRoutes = require('./routes/api.routes');
 const errorHandler = require('./middleware/errorHandler');
 const AppError = require('./utils/appError');
@@ -19,11 +20,14 @@ const server = http.createServer(app);
 
 // 1. Basic Middleware & Security
 app.use(helmet({
-  contentSecurityPolicy: false // Allows easy integration with dev tools and socket.io
+  contentSecurityPolicy: false, // Allows easy integration with dev tools and socket.io
+  // The projector page (port 5173) plays clips served from this server (port 5000)
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
-// Static media and assets
-app.use('/media', express.static(path.join(__dirname, 'public/media')));
+// Audio-visual round clips: backend/public/media/<file> is served at /media/<file>
+// (express.static supports range requests, so the projector can seek and replay)
+app.use('/media', express.static(MEDIA_DIR, { fallthrough: false }));
 
 // CORS: teams' phones reach the frontend via the host laptop's LAN IP
 // (e.g. http://192.168.1.100:5173), which isn't known ahead of time.
@@ -81,6 +85,11 @@ async function startServer() {
   await connectDB();
   await store.seedDatabaseIfEmpty();
   await hydrateRealtimeState();
+
+  const missingMedia = findMissingMedia(await store.getQuestions());
+  missingMedia.forEach((m) => {
+    console.warn(`⚠️  [Media] ${m.roundType} question #${m.order} points at ${m.mediaUrl}, which is not in public/media`);
+  });
 
   if (!process.env.ADMIN_PASSWORD) {
     console.warn('⚠️  [Auth] ADMIN_PASSWORD not set: default admin login is admin / admin123. Set it in .env before the event.');
