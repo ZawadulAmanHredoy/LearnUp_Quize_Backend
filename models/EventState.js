@@ -61,6 +61,8 @@ const EventStateSchema = new mongoose.Schema({
   },
   rapidFireSubState: {
     isActive: { type: Boolean, default: false },
+    teamId: { type: String, default: null },
+    currentQuestionIndex: { type: Number, default: 0 },
     timerSecondsRemaining: { type: Number, default: 60 },
     totalQuestionsAsked: { type: Number, default: 0 },
     correctAnswersCount: { type: Number, default: 0 },

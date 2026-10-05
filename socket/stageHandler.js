@@ -1,102 +1,183 @@
 const store = require('../utils/store');
+const { broadcast } = require('./broadcast');
 const { openBuzzer, resetBuzzer } = require('./buzzerHandler');
+
+const STAGES = [
+  'PRE_EVENT',
+  'WELCOME',
+  'BREAK',
+  'ROUND_BUZZER',
+  'ROUND_AV',
+  'ROUND_RAPID_FIRE',
+  'LEADERBOARD',
+  'FINAL_WINNER'
+];
+const BREAK_TYPES = ['PRAYER', 'LUNCH', 'INTERMISSION', 'CUSTOM'];
+const MEDIA_ACTIONS = ['play', 'pause', 'replay', 'seek', 'mute', 'unmute'];
 
 let countdownInterval = null;
 
-function registerStageHandlers(socket, io) {
+function clearCountdown() {
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+    countdownInterval = null;
+  }
+}
+
+function freshQuestionSubState({ isQuestionVisible = true } = {}) {
+  return {
+    isQuestionVisible,
+    revealedOptions: [],
+    areAllOptionsVisible: false,
+    isCountdownActive: false,
+    hasCountdownStarted: false,
+    isCountdownDone: false,
+    isBuzzerOpen: false,
+    buzzerLockedBy: null,
+    selectedOptionIndex: null,
+    isAnswerLocked: false,
+    isEvaluated: false,
+    isCorrect: null
+  };
+}
+
+/**
+ * Rank teams and detect a tie for first place (Rules.md §5.1 sudden death)
+ */
+function computeStandings(teams) {
+  const standings = [...teams].sort((a, b) => (b.score || 0) - (a.score || 0));
+  const topScore = standings[0]?.score ?? null;
+  const leaders = standings.filter((t) => t.score === topScore);
+  return {
+    standings,
+    champion: leaders.length === 1 ? leaders[0] : null,
+    isTie: leaders.length > 1,
+    tiedTeams: leaders.length > 1 ? leaders : []
+  };
+}
+
+function registerStageHandlers(socket, io, { onAdmin, notice }) {
   // 1. STAGE SHIFT
-  socket.on('admin:set-stage', async ({ stage, metadata = {} }) => {
+  onAdmin('admin:set-stage', async ({ stage, metadata = {} } = {}) => {
+    if (!STAGES.includes(stage)) {
+      notice(`Unknown stage: ${stage}`);
+      return;
+    }
+    clearCountdown();
     resetBuzzer(io);
 
-    const updatedState = await store.updateEventState({
-      currentStage: stage
-    });
-
-    io.emit('stage:updated', { stage, metadata, state: updatedState });
+    const updatedState = await store.updateEventState({ currentStage: stage });
+    broadcast(io, 'stage:updated', { stage, metadata, state: updatedState });
   });
 
   // 2. BREAK SCREENS
-  socket.on('admin:set-break', async ({ breakType = 'INTERMISSION', durationMinutes = 15, message }) => {
+  onAdmin('admin:set-break', async ({ breakType = 'INTERMISSION', durationMinutes = 15, message } = {}) => {
+    const type = BREAK_TYPES.includes(breakType) ? breakType : 'INTERMISSION';
     const breakMessages = {
       PRAYER: 'Prayer Break — We will resume in a short while.',
       LUNCH: 'Lunch & Refreshment Intermission — Enjoy your meal.',
       INTERMISSION: 'Short Intermission — The battle resumes shortly.',
-      CUSTOM: message || 'Intermission'
+      CUSTOM: 'Intermission'
     };
 
     const breakConfig = {
-      type: breakType,
-      message: message || breakMessages[breakType] || 'Break',
+      type,
+      message: (typeof message === 'string' && message.trim()) || breakMessages[type],
       startedAt: new Date(),
-      durationMinutes: Number(durationMinutes) || 15
+      durationMinutes: Math.min(Math.max(Number(durationMinutes) || 15, 1), 240)
     };
 
+    clearCountdown();
+    resetBuzzer(io);
     const updatedState = await store.updateEventState({
       currentStage: 'BREAK',
       breakConfig
     });
 
-    io.emit('stage:updated', { stage: 'BREAK', state: updatedState });
-    io.emit('break:started', breakConfig);
+    broadcast(io, 'stage:updated', { stage: 'BREAK', state: updatedState });
+    broadcast(io, 'break:started', breakConfig);
   });
 
-  socket.on('admin:end-break', async ({ nextStage = 'ROUND_BUZZER' } = {}) => {
-    const updatedState = await store.updateEventState({
-      currentStage: nextStage
-    });
+  onAdmin('admin:end-break', async ({ nextStage = 'ROUND_BUZZER' } = {}) => {
+    const stage = STAGES.includes(nextStage) ? nextStage : 'ROUND_BUZZER';
+    const updatedState = await store.updateEventState({ currentStage: stage });
 
-    io.emit('stage:updated', { stage: nextStage, state: updatedState });
-    io.emit('break:ended', { nextStage });
+    broadcast(io, 'stage:updated', { stage, state: updatedState });
+    broadcast(io, 'break:ended', { nextStage: stage });
   });
 
   // 3. LOAD / BROADCAST QUESTION
-  socket.on('admin:load-question', async ({ questionId, questionIndex }) => {
+  // Audio-visual questions load media-first: the question text and options
+  // stay hidden until the admin sends admin:show-question.
+  onAdmin('admin:load-question', async ({ questionId, questionIndex } = {}) => {
+    const question = await store.getQuestionById(questionId);
+    if (!question) {
+      notice('Question not found');
+      return;
+    }
+
+    clearCountdown();
     resetBuzzer(io);
 
-    const question = await store.getQuestionById(questionId);
-
-    const questionSubState = {
-      isQuestionVisible: true,
-      revealedOptions: [],
-      areAllOptionsVisible: false,
-      isCountdownActive: false,
-      hasCountdownStarted: false,
-      isCountdownDone: false,
-      isBuzzerOpen: false,
-      buzzerLockedBy: null,
-      selectedOptionIndex: null,
-      isAnswerLocked: false,
-      isEvaluated: false,
-      isCorrect: null
-    };
+    const isMediaFirst = question.roundType === 'AUDIO_VISUAL';
+    const questionSubState = freshQuestionSubState({ isQuestionVisible: !isMediaFirst });
 
     await store.updateEventState({
-      activeQuestionId: questionId,
-      currentQuestionIndex: questionIndex !== undefined ? questionIndex : 0,
+      activeQuestionId: question._id,
+      currentQuestionIndex: Number.isInteger(questionIndex) ? questionIndex : 0,
       questionSubState
     });
 
-    io.emit('question:presented', {
-      questionId,
+    broadcast(io, 'question:presented', {
+      questionId: question._id,
       questionIndex,
       question,
       questionSubState
     });
   });
 
-  // 4. REVEAL OPTION(S)
-  socket.on('admin:reveal-option', async ({ optionIndex, revealAll = false }) => {
+  // 3b. SHOW QUESTION & OPTIONS (after AV media has played)
+  onAdmin('admin:show-question', async () => {
     const state = await store.getEventState();
+    const question = await store.getQuestionById(state.activeQuestionId);
+    if (!question) {
+      notice('Load a question first');
+      return;
+    }
+
+    const revealed = (question.options || []).map((_, idx) => idx);
+    const updatedState = await store.updateEventState({
+      questionSubState: {
+        isQuestionVisible: true,
+        revealedOptions: revealed,
+        areAllOptionsVisible: true
+      }
+    });
+
+    broadcast(io, 'question:shown', { questionSubState: updatedState.questionSubState });
+    broadcast(io, 'options:updated', { revealedIndices: revealed, allRevealed: true });
+  });
+
+  // 4. REVEAL OPTION(S)
+  onAdmin('admin:reveal-option', async ({ optionIndex, revealAll = false } = {}) => {
+    const state = await store.getEventState();
+    const question = await store.getQuestionById(state.activeQuestionId);
+    const optionCount = question?.options?.length || 4;
     let revealed = [...(state.questionSubState?.revealedOptions || [])];
 
     if (revealAll) {
-      revealed = [0, 1, 2, 3];
-    } else if (optionIndex !== undefined && !revealed.includes(optionIndex)) {
-      revealed.push(optionIndex);
-      revealed.sort((a, b) => a - b);
+      revealed = Array.from({ length: optionCount }, (_, idx) => idx);
+    } else if (Number.isInteger(optionIndex) && optionIndex >= 0 && optionIndex < optionCount) {
+      if (!revealed.includes(optionIndex)) {
+        revealed.push(optionIndex);
+        revealed.sort((a, b) => a - b);
+      }
+    } else {
+      notice('Invalid option index');
+      return;
     }
 
-    const areAllOptionsVisible = revealed.length >= 4;
+    const areAllOptionsVisible = revealed.length >= optionCount;
 
     await store.updateEventState({
       questionSubState: {
@@ -105,7 +186,7 @@ function registerStageHandlers(socket, io) {
       }
     });
 
-    io.emit('options:updated', {
+    broadcast(io, 'options:updated', {
       revealedIndices: revealed,
       allRevealed: areAllOptionsVisible,
       revealedIndex: optionIndex
@@ -113,18 +194,20 @@ function registerStageHandlers(socket, io) {
   });
 
   // 5. 3-2-1 SYNCHRONIZED COUNTDOWN (STRICTLY ONCE PER QUESTION)
-  socket.on('admin:start-countdown', async ({ seconds = 3 } = {}) => {
+  onAdmin('admin:start-countdown', async ({ seconds = 3 } = {}) => {
     const currentState = await store.getEventState();
+    const sub = currentState.questionSubState || {};
 
-    if (currentState.questionSubState?.hasCountdownStarted || currentState.questionSubState?.isCountdownActive) {
-      socket.emit('admin:notice', { message: 'Countdown can only be started once per question.' });
+    if (!sub.isQuestionVisible) {
+      notice('Broadcast a question before starting the countdown.');
+      return;
+    }
+    if (sub.hasCountdownStarted || sub.isCountdownActive || sub.isEvaluated) {
+      notice('Countdown can only be started once per question.');
       return;
     }
 
-    if (countdownInterval) {
-      clearInterval(countdownInterval);
-    }
-
+    clearCountdown();
     resetBuzzer(io);
 
     await store.updateEventState({
@@ -136,36 +219,48 @@ function registerStageHandlers(socket, io) {
       }
     });
 
-    let currentCount = seconds;
-    io.emit('countdown:tick', { count: currentCount });
+    let currentCount = Math.min(Math.max(Number(seconds) || 3, 1), 10);
+    broadcast(io, 'countdown:tick', { count: currentCount });
 
     countdownInterval = setInterval(() => {
       currentCount -= 1;
 
       if (currentCount > 0) {
-        io.emit('countdown:tick', { count: currentCount });
-      } else if (currentCount === 0) {
-        clearInterval(countdownInterval);
-        countdownInterval = null;
-        io.emit('countdown:tick', { count: 0, text: 'GO!' });
-
-        store.updateEventState({
-          questionSubState: {
-            isCountdownActive: false,
-            hasCountdownStarted: true,
-            isCountdownDone: true,
-            isBuzzerOpen: true
-          }
-        });
-
-        // Unlock buzzer on mobile screens
-        openBuzzer(io);
+        broadcast(io, 'countdown:tick', { count: currentCount });
+        return;
       }
+
+      clearCountdown();
+      broadcast(io, 'countdown:tick', { count: 0, text: 'GO!' });
+
+      store.updateEventState({
+        questionSubState: {
+          isCountdownActive: false,
+          hasCountdownStarted: true,
+          isCountdownDone: true
+        }
+      });
+
+      // Unlock buzzer on mobile screens
+      openBuzzer(io);
     }, 1000);
   });
 
   // 6. LOCK ANSWER (Host clicks the spoken option)
-  socket.on('admin:lock-answer', async ({ selectedOptionIndex }) => {
+  onAdmin('admin:lock-answer', async ({ selectedOptionIndex } = {}) => {
+    const state = await store.getEventState();
+    const question = await store.getQuestionById(state.activeQuestionId);
+    const optionCount = question?.options?.length || 4;
+
+    if (state.questionSubState?.isEvaluated) {
+      notice('This question has already been evaluated.');
+      return;
+    }
+    if (!Number.isInteger(selectedOptionIndex) || selectedOptionIndex < 0 || selectedOptionIndex >= optionCount) {
+      notice('Invalid option index');
+      return;
+    }
+
     await store.updateEventState({
       questionSubState: {
         selectedOptionIndex,
@@ -173,84 +268,108 @@ function registerStageHandlers(socket, io) {
       }
     });
 
-    io.emit('answer:locked', { selectedOptionIndex });
+    broadcast(io, 'answer:locked', { selectedOptionIndex });
   });
 
   // 7. EVALUATE ANSWER (+Points / -Points, NO REOPEN)
-  socket.on('admin:evaluate', async ({ isCorrect, points, negativePoints, teamId, correctOptionIndex }) => {
+  // Points and the correct option come from the stored question, never from
+  // the client. The answering team is the buzzer winner, or the designated
+  // team in the audio-visual round.
+  onAdmin('admin:evaluate', async ({ isCorrect } = {}) => {
     const state = await store.getEventState();
-    const activeTeamId = teamId || state.questionSubState?.buzzerLockedBy?.teamId || state.activeTeamId;
+    const sub = state.questionSubState || {};
+    const question = await store.getQuestionById(state.activeQuestionId);
 
-    const pointsGranted = isCorrect
-      ? (points !== undefined ? points : 10)
-      : -(negativePoints !== undefined ? negativePoints : 5);
-
-    let updatedTeam = null;
-    if (activeTeamId) {
-      updatedTeam = await store.adjustTeamScore(activeTeamId, pointsGranted, state.currentStage);
+    if (!question) {
+      notice('No active question to evaluate.');
+      return;
+    }
+    if (sub.isEvaluated) {
+      notice('This question has already been evaluated.');
+      return;
     }
 
-    const updatedTeams = await store.getTeams();
+    const isAvRound = question.roundType === 'AUDIO_VISUAL';
+    const answeringTeamId = isAvRound ? state.activeTeamId : sub.buzzerLockedBy?.teamId;
+    if (!answeringTeamId) {
+      notice(isAvRound ? 'Designate the team whose turn it is first.' : 'No team has buzzed in yet.');
+      return;
+    }
 
+    // Re-check against the live state right before marking it: two quick
+    // clicks can both get past the earlier awaits.
+    if (store.peekEventState().questionSubState?.isEvaluated) {
+      notice('This question has already been evaluated.');
+      return;
+    }
+
+    const correct = Boolean(isCorrect);
+    const pointsGranted = correct
+      ? Number(question.points ?? 10)
+      : -Math.abs(Number(question.negativePoints ?? (isAvRound ? 0 : 5)));
+
+    // Mark evaluated before awaiting the score write so a double click
+    // can't award points twice.
     await store.updateEventState({
       questionSubState: {
         isEvaluated: true,
-        isCorrect: Boolean(isCorrect)
+        isCorrect: correct
       }
     });
 
-    // Broadcast evaluation to all screens
-    io.emit('answer:evaluated', {
-      isCorrect: Boolean(isCorrect),
-      selectedOptionIndex: state.questionSubState?.selectedOptionIndex,
-      correctOptionIndex: correctOptionIndex !== undefined ? correctOptionIndex : 0,
+    const updatedTeam = await store.adjustTeamScore(answeringTeamId, pointsGranted, question.roundType);
+    const updatedTeams = await store.getTeams();
+
+    broadcast(io, 'answer:evaluated', {
+      isCorrect: correct,
+      selectedOptionIndex: sub.selectedOptionIndex,
+      correctOptionIndex: question.correctOptionIndex,
+      explanation: question.explanation || '',
       pointsAwarded: pointsGranted,
-      teamId: activeTeamId,
-      teamName: updatedTeam?.teamName || state.questionSubState?.buzzerLockedBy?.teamName,
-      updatedTeamScore: updatedTeam?.score || 0,
+      teamId: answeringTeamId,
+      teamName: updatedTeam?.teamName || sub.buzzerLockedBy?.teamName || null,
+      updatedTeamScore: updatedTeam?.score ?? 0,
       teams: updatedTeams
     });
 
-    io.emit('leaderboard:update', updatedTeams);
+    broadcast(io, 'leaderboard:update', updatedTeams);
   });
 
   // 8. AUDIO-VISUAL REMOTE PLAYBACK CONTROLS
-  socket.on('admin:media-control', ({ action, time = 0 }) => {
-    // action: 'play' | 'pause' | 'replay' | 'seek'
-    io.emit('media:sync', { action, time, timestamp: Date.now() });
+  onAdmin('admin:media-control', ({ action, time = 0 } = {}) => {
+    if (!MEDIA_ACTIONS.includes(action)) {
+      notice(`Unknown media action: ${action}`);
+      return;
+    }
+    broadcast(io, 'media:sync', { action, time: Number(time) || 0, timestamp: Date.now() });
   });
 
   // 9. SET ACTIVE TEAM TURN (for AV turn rotation)
-  socket.on('admin:set-active-team', async ({ teamId }) => {
+  onAdmin('admin:set-active-team', async ({ teamId } = {}) => {
     const team = await store.getTeamById(teamId);
+    if (!team) {
+      notice('Team not found');
+      return;
+    }
 
-    await store.updateEventState({
-      activeTeamId: teamId
-    });
-
-    io.emit('turn:updated', {
-      activeTeamId: teamId,
-      team
-    });
+    await store.updateEventState({ activeTeamId: String(team._id) });
+    broadcast(io, 'turn:updated', { activeTeamId: String(team._id), team });
   });
 
-  // 10. ANNOUNCE FINAL WINNER
-  socket.on('admin:announce-winner', async () => {
+  // 10. ANNOUNCE FINAL WINNER (or a tie that needs a sudden-death question)
+  onAdmin('admin:announce-winner', async () => {
     const teams = await store.getTeams();
-    const winner = teams[0] || null;
+    const result = computeStandings(teams);
 
-    await store.updateEventState({
-      currentStage: 'FINAL_WINNER'
-    });
+    const updatedState = await store.updateEventState({ currentStage: 'FINAL_WINNER' });
 
-    io.emit('stage:updated', { stage: 'FINAL_WINNER' });
-    io.emit('winner:celebration', {
-      champion: winner,
-      standings: teams
-    });
+    broadcast(io, 'stage:updated', { stage: 'FINAL_WINNER', state: updatedState });
+    broadcast(io, 'winner:celebration', result);
   });
 }
 
 module.exports = {
-  registerStageHandlers
+  registerStageHandlers,
+  computeStandings,
+  clearCountdown
 };

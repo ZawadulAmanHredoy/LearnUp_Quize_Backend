@@ -1,5 +1,10 @@
 const store = require('../utils/store');
 const AppError = require('../utils/appError');
+const { forAdmin, forPublic } = require('../utils/sanitize');
+const { setSession, revokeTeamSockets } = require('../socket/sessions');
+const { broadcast } = require('../socket/broadcast');
+
+const UPDATABLE_TEAM_FIELDS = ['teamName', 'teamNumber', 'pin'];
 
 /**
  * Get all teams with current scores and status
@@ -7,11 +12,12 @@ const AppError = require('../utils/appError');
  */
 async function getTeams(req, res, next) {
   try {
+    // Public callers (e.g. the launchpad) get names and scores only
     const teams = await store.getTeams();
     res.status(200).json({
       success: true,
       count: teams.length,
-      data: teams
+      data: req.admin ? forAdmin(teams) : forPublic(teams)
     });
   } catch (err) {
     next(err);
@@ -26,8 +32,11 @@ async function createTeam(req, res, next) {
   try {
     const { teamName, teamNumber, pin } = req.body;
 
-    if (!teamName || !teamNumber || !pin) {
+    if (!String(teamName || '').trim() || !teamNumber || !String(pin || '').trim()) {
       return next(new AppError('Please provide teamName, teamNumber, and pin', 400));
+    }
+    if (!Number.isInteger(Number(teamNumber)) || Number(teamNumber) < 1) {
+      return next(new AppError('teamNumber must be a positive whole number', 400));
     }
 
     const existing = await store.getTeamByNumber(teamNumber);
@@ -36,19 +45,19 @@ async function createTeam(req, res, next) {
     }
 
     const newTeam = await store.createTeam({
-      teamName: teamName.trim(),
+      teamName: String(teamName).trim(),
       teamNumber: Number(teamNumber),
       pin: String(pin).trim()
     });
 
     const allTeams = await store.getTeams();
     if (req.io) {
-      req.io.emit('leaderboard:update', allTeams);
+      broadcast(req.io, 'leaderboard:update', allTeams);
     }
 
     res.status(201).json({
       success: true,
-      data: newTeam
+      data: forAdmin(newTeam)
     });
   } catch (err) {
     next(err);
@@ -61,10 +70,12 @@ async function createTeam(req, res, next) {
  */
 async function deleteTeam(req, res, next) {
   try {
+    revokeTeamSockets(req.io, req.params.id, 'auth:session_revoked', 'Your team was removed by the admin.');
+    setSession(req.params.id, null);
     await store.deleteTeam(req.params.id);
     const allTeams = await store.getTeams();
     if (req.io) {
-      req.io.emit('leaderboard:update', allTeams);
+      broadcast(req.io, 'leaderboard:update', allTeams);
     }
     res.status(200).json({
       success: true,
@@ -81,14 +92,22 @@ async function deleteTeam(req, res, next) {
  */
 async function updateTeam(req, res, next) {
   try {
-    const updated = await store.updateTeam(req.params.id, req.body);
+    // Only profile fields are editable here; scores and sessions have their own endpoints
+    const updates = {};
+    for (const field of UPDATABLE_TEAM_FIELDS) {
+      if (req.body[field] !== undefined) updates[field] = req.body[field];
+    }
+    if (updates.teamNumber !== undefined) updates.teamNumber = Number(updates.teamNumber);
+    if (updates.pin !== undefined) updates.pin = String(updates.pin).trim();
+
+    const updated = await store.updateTeam(req.params.id, updates);
     if (!updated) {
       return next(new AppError('Team not found', 404));
     }
 
     res.status(200).json({
       success: true,
-      data: updated
+      data: forAdmin(updated)
     });
   } catch (err) {
     next(err);
@@ -111,16 +130,13 @@ async function resetTeamSession(req, res, next) {
       return next(new AppError('Team not found', 404));
     }
 
-    if (req.io) {
-      req.io.to(`team:${updated._id}`).emit('auth:session_revoked', {
-        message: 'Admin reset your device session. Please log in again.'
-      });
-    }
+    setSession(updated._id, null);
+    revokeTeamSockets(req.io, updated._id, 'auth:session_revoked', 'Admin reset your device session. Please log in again.');
 
     res.status(200).json({
       success: true,
       message: `Session for Team #${updated.teamNumber} (${updated.teamName}) has been reset.`,
-      data: updated
+      data: forAdmin(updated)
     });
   } catch (err) {
     next(err);
@@ -136,13 +152,13 @@ async function resetScores(req, res, next) {
     const teams = await store.resetAllTeamScores();
 
     if (req.io) {
-      req.io.emit('leaderboard:update', teams);
+      broadcast(req.io, 'leaderboard:update', teams);
     }
 
     res.status(200).json({
       success: true,
       message: 'All team scores reset to 0',
-      data: teams
+      data: forAdmin(teams)
     });
   } catch (err) {
     next(err);

@@ -77,8 +77,8 @@ async function createQuestion(req, res, next) {
       mediaUrl: mediaUrl || null,
       options: options || [],
       correctOptionIndex: Number(correctOptionIndex) || 0,
-      points: Number(points) || 10,
-      negativePoints: Number(negativePoints) || 0,
+      points: points !== undefined ? Number(points) : 10,
+      negativePoints: negativePoints !== undefined ? Number(negativePoints) : (roundType === 'BUZZER' ? 5 : 0),
       timeLimitSeconds: Number(timeLimitSeconds) || 30,
       explanation: explanation || ''
     });
@@ -127,19 +127,11 @@ async function updateQuestion(req, res, next) {
       return next(new AppError('Question not found', 404));
     }
 
-    // In-memory or DB update
-    const index = store.memoryStore.questions.findIndex((q) => String(q._id) === String(req.params.id));
-    if (index !== -1) {
-      store.memoryStore.questions[index] = {
-        ...store.memoryStore.questions[index],
-        ...req.body,
-        updatedAt: new Date()
-      };
-    }
+    const updated = await store.updateQuestion(req.params.id, req.body);
 
     res.status(200).json({
       success: true,
-      data: store.memoryStore.questions[index] || question
+      data: updated || question
     });
   } catch (err) {
     next(err);
@@ -152,9 +144,10 @@ async function updateQuestion(req, res, next) {
  */
 async function deleteQuestion(req, res, next) {
   try {
-    store.memoryStore.questions = store.memoryStore.questions.filter(
-      (q) => String(q._id) !== String(req.params.id)
-    );
+    const deleted = await store.deleteQuestion(req.params.id);
+    if (!deleted) {
+      return next(new AppError('Question not found', 404));
+    }
 
     res.status(200).json({
       success: true,

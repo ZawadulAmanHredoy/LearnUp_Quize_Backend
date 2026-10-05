@@ -1,7 +1,13 @@
 const store = require('../utils/store');
+const { forAdmin } = require('../utils/sanitize');
+const { broadcast } = require('../socket/broadcast');
+const { resetBuzzer } = require('../socket/buzzerHandler');
+const { stopRapidFire } = require('../socket/rapidFireHandler');
+const { clearCountdown } = require('../socket/stageHandler');
 
 /**
- * Get current event state snapshot for rehydration
+ * Get current event state snapshot for rehydration (admin only: it includes
+ * the answer key and team PINs)
  * GET /api/v1/event/state
  */
 async function getState(req, res, next) {
@@ -9,15 +15,16 @@ async function getState(req, res, next) {
     const state = await store.getEventState();
     const teams = await store.getTeams();
     const questions = await store.getQuestions();
+    const activeQuestion = state.activeQuestionId ? await store.getQuestionById(state.activeQuestionId) : null;
 
     res.status(200).json({
       success: true,
-      data: {
+      data: forAdmin({
         state,
         teams,
-        activeQuestion: questions.find((q) => String(q._id) === String(state.activeQuestionId)) || questions[0] || null,
+        activeQuestion,
         totalQuestions: questions.length
-      }
+      })
     });
   } catch (err) {
     next(err);
@@ -30,19 +37,25 @@ async function getState(req, res, next) {
  */
 async function resetEvent(req, res, next) {
   try {
+    if (req.io) {
+      clearCountdown();
+      stopRapidFire(req.io, 'EVENT_RESET');
+      resetBuzzer(req.io);
+    }
+
     const state = await store.resetEventState();
     const teams = await store.resetAllTeamScores();
 
     if (req.io) {
-      req.io.emit('stage:updated', { stage: 'WELCOME' });
-      req.io.emit('state:sync', { state, teams });
-      req.io.emit('buzzer:status', { isOpen: false });
+      broadcast(req.io, 'state:sync', { state, teams, activeQuestion: null });
+      broadcast(req.io, 'stage:updated', { stage: 'WELCOME', state });
+      broadcast(req.io, 'leaderboard:update', teams);
     }
 
     res.status(200).json({
       success: true,
       message: 'Event reset to WELCOME successfully',
-      data: { state, teams }
+      data: forAdmin({ state, teams })
     });
   } catch (err) {
     next(err);

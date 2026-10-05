@@ -1,9 +1,26 @@
+const fs = require('fs');
+const path = require('path');
 const mongoose = require('mongoose');
 const Admin = require('../models/Admin');
 const Team = require('../models/Team');
 const Question = require('../models/Question');
 const EventState = require('../models/EventState');
 const { hashPassword } = require('./auth');
+
+const QUESTIONS_JSON_PATH = path.join(__dirname, '../data/questions.json');
+const DEFAULT_ADMIN_USERNAME = (process.env.ADMIN_USERNAME || 'admin').toLowerCase().trim();
+const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+
+function loadCodebaseQuestions() {
+  try {
+    if (fs.existsSync(QUESTIONS_JSON_PATH)) {
+      return JSON.parse(fs.readFileSync(QUESTIONS_JSON_PATH, 'utf8'));
+    }
+  } catch (err) {
+    console.warn('[Store] Could not read data/questions.json:', err.message);
+  }
+  return null;
+}
 
 // Seed Questions across all 3 rounds
 const SEED_QUESTIONS = [
@@ -297,12 +314,12 @@ const SEED_TEAMS = [
 const memoryStore = {
   admin: {
     _id: 'admin_master',
-    username: 'admin',
-    password: hashPassword('admin123'),
+    username: DEFAULT_ADMIN_USERNAME,
+    password: hashPassword(DEFAULT_ADMIN_PASSWORD),
     role: 'SUPER_ADMIN'
   },
   teams: JSON.parse(JSON.stringify(SEED_TEAMS)),
-  questions: JSON.parse(JSON.stringify(SEED_QUESTIONS)),
+  questions: loadCodebaseQuestions() || JSON.parse(JSON.stringify(SEED_QUESTIONS)),
   eventState: {
     eventId: 'learnup-live-event-2026',
     currentStage: 'WELCOME',
@@ -329,6 +346,8 @@ const memoryStore = {
     activeTeamId: null,
     rapidFireSubState: {
       isActive: false,
+      teamId: null,
+      currentQuestionIndex: 0,
       timerSecondsRemaining: 60,
       totalQuestionsAsked: 0,
       correctAnswersCount: 0,
@@ -346,63 +365,93 @@ function isDbConnected() {
 // -------------------------------------------------------------
 // EVENT STATE OPERATIONS
 // -------------------------------------------------------------
-async function getEventState() {
-  if (isDbConnected()) {
-    try {
-      let state = await EventState.findOne({ eventId: 'learnup-live-event-2026' }).lean();
-      if (!state) {
-        state = await EventState.create(memoryStore.eventState);
-      }
-      return state;
-    } catch (err) {
-      console.warn('[Store] DB read failed, using memory state:', err.message);
+const EVENT_ID = 'learnup-live-event-2026';
+let isEventStateHydrated = false;
+let dbWriteChain = Promise.resolve();
+
+function stripMongoMeta(doc) {
+  if (!doc) return doc;
+  const { _id, __v, ...rest } = doc;
+  return rest;
+}
+
+/**
+ * Load the persisted EventState into memory. Memory is the live copy that
+ * every handler reads; MongoDB is the write-through backup (ADR-004).
+ */
+async function hydrateEventState() {
+  if (!isDbConnected()) return memoryStore.eventState;
+  try {
+    const state = await EventState.findOne({ eventId: EVENT_ID }).lean();
+    if (state) {
+      memoryStore.eventState = {
+        ...memoryStore.eventState,
+        ...stripMongoMeta(state),
+        questionSubState: { ...memoryStore.eventState.questionSubState, ...(state.questionSubState || {}) },
+        breakConfig: { ...memoryStore.eventState.breakConfig, ...(state.breakConfig || {}) },
+        rapidFireSubState: { ...memoryStore.eventState.rapidFireSubState, ...(state.rapidFireSubState || {}) }
+      };
+    } else {
+      await EventState.create(memoryStore.eventState);
     }
+    isEventStateHydrated = true;
+  } catch (err) {
+    console.warn('[Store] Could not load EventState from DB, using memory state:', err.message);
   }
   return memoryStore.eventState;
 }
 
-async function updateEventState(updates) {
-  const mergedQuestionSubState = updates.questionSubState
-    ? { ...memoryStore.eventState.questionSubState, ...updates.questionSubState }
-    : memoryStore.eventState.questionSubState;
+function peekEventState() {
+  return memoryStore.eventState;
+}
 
-  const mergedBreakConfig = updates.breakConfig
-    ? { ...memoryStore.eventState.breakConfig, ...updates.breakConfig }
-    : memoryStore.eventState.breakConfig;
+async function getEventState() {
+  if (isDbConnected() && !isEventStateHydrated) {
+    await hydrateEventState();
+  }
+  return memoryStore.eventState;
+}
 
-  const mergedRapidFireSubState = updates.rapidFireSubState
-    ? { ...memoryStore.eventState.rapidFireSubState, ...updates.rapidFireSubState }
-    : memoryStore.eventState.rapidFireSubState;
+/**
+ * Persist the full current state. Writes are chained so they reach MongoDB
+ * in the same order the changes happened.
+ */
+function persistEventState() {
+  if (!isDbConnected()) return dbWriteChain;
+  const snapshot = { ...memoryStore.eventState };
+  dbWriteChain = dbWriteChain
+    .then(() =>
+      EventState.findOneAndUpdate({ eventId: EVENT_ID }, { $set: snapshot }, { upsert: true })
+    )
+    .catch((err) => {
+      console.warn('[Store] DB write failed:', err.message);
+    });
+  return dbWriteChain;
+}
 
+/**
+ * Merge updates into the live state. The in-memory merge happens
+ * synchronously, so callers can rely on it before the DB write finishes.
+ */
+function updateEventState(updates) {
+  const current = memoryStore.eventState;
   memoryStore.eventState = {
-    ...memoryStore.eventState,
+    ...current,
     ...updates,
-    questionSubState: mergedQuestionSubState,
-    breakConfig: mergedBreakConfig,
-    rapidFireSubState: mergedRapidFireSubState,
+    questionSubState: updates.questionSubState
+      ? { ...current.questionSubState, ...updates.questionSubState }
+      : current.questionSubState,
+    breakConfig: updates.breakConfig
+      ? { ...current.breakConfig, ...updates.breakConfig }
+      : current.breakConfig,
+    rapidFireSubState: updates.rapidFireSubState
+      ? { ...current.rapidFireSubState, ...updates.rapidFireSubState }
+      : current.rapidFireSubState,
     lastUpdated: new Date()
   };
 
-  if (isDbConnected()) {
-    try {
-      const dbUpdates = {
-        ...updates,
-        ...(updates.questionSubState ? { questionSubState: mergedQuestionSubState } : {}),
-        ...(updates.breakConfig ? { breakConfig: mergedBreakConfig } : {}),
-        ...(updates.rapidFireSubState ? { rapidFireSubState: mergedRapidFireSubState } : {}),
-        lastUpdated: new Date()
-      };
-      await EventState.findOneAndUpdate(
-        { eventId: 'learnup-live-event-2026' },
-        { $set: dbUpdates },
-        { upsert: true, new: true }
-      );
-    } catch (err) {
-      console.warn('[Store] DB write failed:', err.message);
-    }
-  }
-
-  return memoryStore.eventState;
+  const state = memoryStore.eventState;
+  return persistEventState().then(() => state);
 }
 
 async function resetEventState() {
@@ -416,7 +465,7 @@ async function resetEventState() {
       durationMinutes: 15
     },
     currentQuestionIndex: 0,
-    activeQuestionId: memoryStore.questions[0]?._id || null,
+    activeQuestionId: (await getQuestions())[0]?._id || null,
     questionSubState: {
       isQuestionVisible: false,
       revealedOptions: [],
@@ -432,6 +481,8 @@ async function resetEventState() {
     activeTeamId: null,
     rapidFireSubState: {
       isActive: false,
+      teamId: null,
+      currentQuestionIndex: 0,
       timerSecondsRemaining: 60,
       totalQuestionsAsked: 0,
       correctAnswersCount: 0,
@@ -442,18 +493,7 @@ async function resetEventState() {
   };
 
   memoryStore.eventState = freshState;
-
-  if (isDbConnected()) {
-    try {
-      await EventState.findOneAndUpdate(
-        { eventId: 'learnup-live-event-2026' },
-        { $set: freshState },
-        { upsert: true }
-      );
-    } catch (err) {
-      console.warn('[Store] DB reset failed:', err.message);
-    }
-  }
+  await persistEventState();
 
   return freshState;
 }
@@ -507,6 +547,50 @@ async function createQuestion(data) {
   }
 
   return newQ;
+}
+
+async function updateQuestion(id, updates) {
+  const { _id, createdAt, ...safeUpdates } = updates;
+  const index = memoryStore.questions.findIndex((q) => String(q._id) === String(id));
+  if (index !== -1) {
+    memoryStore.questions[index] = {
+      ...memoryStore.questions[index],
+      ...safeUpdates,
+      updatedAt: new Date()
+    };
+  }
+
+  if (isDbConnected() && mongoose.isValidObjectId(id)) {
+    try {
+      const updated = await Question.findByIdAndUpdate(
+        id,
+        { $set: safeUpdates },
+        { new: true, runValidators: true }
+      ).lean();
+      if (updated) return updated;
+    } catch (err) {
+      console.warn('[Store] DB question update failed:', err.message);
+      throw err;
+    }
+  }
+
+  return index !== -1 ? memoryStore.questions[index] : null;
+}
+
+async function deleteQuestion(id) {
+  const before = memoryStore.questions.length;
+  memoryStore.questions = memoryStore.questions.filter((q) => String(q._id) !== String(id));
+  let deleted = memoryStore.questions.length !== before;
+
+  if (isDbConnected() && mongoose.isValidObjectId(id)) {
+    try {
+      const result = await Question.findByIdAndDelete(id);
+      deleted = deleted || Boolean(result);
+    } catch (err) {
+      console.warn('[Store] DB question delete failed:', err.message);
+    }
+  }
+  return deleted;
 }
 
 async function bulkCreateQuestions(questionsArray) {
@@ -627,22 +711,46 @@ async function updateTeam(id, updates) {
   return memoryStore.teams[teamIndex];
 }
 
+const ROUND_SCORE_KEYS = {
+  ROUND_BUZZER: 'buzzer',
+  BUZZER: 'buzzer',
+  buzzer: 'buzzer',
+  ROUND_AV: 'audioVisual',
+  AUDIO_VISUAL: 'audioVisual',
+  audioVisual: 'audioVisual',
+  ROUND_RAPID_FIRE: 'rapidFire',
+  RAPID_FIRE: 'rapidFire',
+  rapidFire: 'rapidFire'
+};
+
+/**
+ * Add (or subtract) points from a team. Totals may go negative so the
+ * negative-marking penalty always applies (Rules.md §2.3).
+ * Uses $inc so rapid consecutive updates can't overwrite each other.
+ */
 async function adjustTeamScore(teamId, pointsChange, roundType = 'buzzer') {
-  const team = await getTeamById(teamId);
-  if (!team) return null;
-
-  const newScore = Math.max(0, (team.score || 0) + pointsChange);
-  const roundScores = { ...(team.roundScores || { buzzer: 0, audioVisual: 0, rapidFire: 0 }) };
-
-  if (roundType === 'ROUND_BUZZER' || roundType === 'BUZZER' || roundType === 'buzzer') {
-    roundScores.buzzer = Math.max(0, (roundScores.buzzer || 0) + pointsChange);
-  } else if (roundType === 'ROUND_AV' || roundType === 'AUDIO_VISUAL' || roundType === 'audioVisual') {
-    roundScores.audioVisual = Math.max(0, (roundScores.audioVisual || 0) + pointsChange);
-  } else if (roundType === 'ROUND_RAPID_FIRE' || roundType === 'RAPID_FIRE' || roundType === 'rapidFire') {
-    roundScores.rapidFire = Math.max(0, (roundScores.rapidFire || 0) + pointsChange);
+  const roundKey = ROUND_SCORE_KEYS[roundType];
+  const memTeam = memoryStore.teams.find(
+    (t) => String(t._id) === String(teamId) || String(t.teamNumber) === String(teamId)
+  );
+  if (memTeam) {
+    memTeam.score = (memTeam.score || 0) + pointsChange;
+    memTeam.roundScores = { buzzer: 0, audioVisual: 0, rapidFire: 0, ...(memTeam.roundScores || {}) };
+    if (roundKey) memTeam.roundScores[roundKey] += pointsChange;
   }
 
-  return await updateTeam(team._id, { score: newScore, roundScores });
+  if (isDbConnected() && mongoose.isValidObjectId(teamId)) {
+    try {
+      const inc = { score: pointsChange };
+      if (roundKey) inc[`roundScores.${roundKey}`] = pointsChange;
+      const updated = await Team.findByIdAndUpdate(teamId, { $inc: inc }, { new: true }).lean();
+      if (updated) return updated;
+    } catch (err) {
+      console.warn('[Store] DB score update failed:', err.message);
+    }
+  }
+
+  return memTeam || null;
 }
 
 async function resetAllTeamScores() {
@@ -677,11 +785,11 @@ async function seedDatabaseIfEmpty() {
     const adminCount = await Admin.countDocuments();
     if (adminCount === 0) {
       await Admin.create({
-        username: 'admin',
-        password: hashPassword('admin123'),
+        username: DEFAULT_ADMIN_USERNAME,
+        password: hashPassword(DEFAULT_ADMIN_PASSWORD),
         role: 'SUPER_ADMIN'
       });
-      console.log('✅ [Seed] Default Admin created: admin / admin123');
+      console.log(`✅ [Seed] Default Admin created: ${DEFAULT_ADMIN_USERNAME}`);
     }
 
     const teamCount = await Team.countDocuments();
@@ -694,10 +802,9 @@ async function seedDatabaseIfEmpty() {
     }
 
     // Synchronize questions from codebase questions.json
-    const jsonPath = path.join(__dirname, '../data/questions.json');
-    if (fs.existsSync(jsonPath)) {
+    const fileQuestions = loadCodebaseQuestions();
+    if (fileQuestions) {
       try {
-        const fileQuestions = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
         for (const q of fileQuestions) {
           const { _id, ...qDoc } = q;
           await Question.findOneAndUpdate(
@@ -721,38 +828,26 @@ async function seedDatabaseIfEmpty() {
       }
     }
 
-    const stateCount = await EventState.countDocuments();
-    if (stateCount === 0) {
-      const firstQ = await Question.findOne();
-      const stateToSeed = {
-        ...memoryStore.eventState,
-        activeQuestionId: firstQ ? String(firstQ._id) : null
-      };
-      await EventState.create(stateToSeed);
-      console.log('✅ [Seed] Initial EventState created in MongoDB Atlas');
-    }
+    await hydrateEventState();
   } catch (err) {
     console.warn('[Store] DB seed notice:', err.message);
   }
 }
 
-// Listen to mongoose connected event to seed, or run immediately if already connected
-if (mongoose.connection.readyState === 1) {
-  seedDatabaseIfEmpty();
-}
-mongoose.connection.on('connected', () => {
-  seedDatabaseIfEmpty();
-});
 
 module.exports = {
   isDbConnected,
   memoryStore,
   getEventState,
+  peekEventState,
+  hydrateEventState,
   updateEventState,
   resetEventState,
   getQuestions,
   getQuestionById,
   createQuestion,
+  updateQuestion,
+  deleteQuestion,
   bulkCreateQuestions,
   getTeams,
   getTeamById,

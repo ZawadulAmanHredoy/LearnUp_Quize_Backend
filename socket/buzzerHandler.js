@@ -1,4 +1,6 @@
 const store = require('../utils/store');
+const { ROOMS, broadcast } = require('./broadcast');
+const { isCurrentSession } = require('./sessions');
 
 // In-Memory Fast Mutex for sub-millisecond atomic arbitration
 let isBuzzerActive = false;
@@ -9,6 +11,15 @@ function getBuzzerStatus() {
     isOpen: isBuzzerActive,
     winner: buzzerWinner
   };
+}
+
+/**
+ * Restore the mutex after a server restart from the persisted EventState
+ */
+function hydrateBuzzer(state) {
+  const sub = state?.questionSubState || {};
+  buzzerWinner = sub.buzzerLockedBy?.teamId ? sub.buzzerLockedBy : null;
+  isBuzzerActive = Boolean(sub.isBuzzerOpen) && !buzzerWinner;
 }
 
 function openBuzzer(io) {
@@ -23,13 +34,14 @@ function openBuzzer(io) {
     }
   });
 
-  io.to('room:teams').emit('buzzer:status', { isOpen: true });
-  io.emit('buzzer:unlocked', { timestamp: Date.now() });
+  io.to(ROOMS.teams).emit('buzzer:status', { isOpen: true });
+  broadcast(io, 'buzzer:unlocked', { timestamp: Date.now() });
 }
 
 function closeBuzzer(io) {
   isBuzzerActive = false;
-  io.to('room:teams').emit('buzzer:status', { isOpen: false });
+  store.updateEventState({ questionSubState: { isBuzzerOpen: false } });
+  io.to(ROOMS.teams).emit('buzzer:status', { isOpen: false });
 }
 
 function resetBuzzer(io) {
@@ -43,11 +55,19 @@ function resetBuzzer(io) {
     }
   });
 
-  io.to('room:teams').emit('buzzer:status', { isOpen: false });
-  io.emit('buzzer:reset');
+  io.to(ROOMS.teams).emit('buzzer:status', { isOpen: false });
+  broadcast(io, 'buzzer:reset', {});
 }
 
-function handleTeamBuzz(socket, data, io) {
+function handleTeamBuzz(socket, io) {
+  const team = socket.data.team;
+
+  // Only an authenticated phone on the team's current session may buzz
+  if (socket.data.role !== 'team' || !team || !isCurrentSession(team.teamId, team.sessionToken)) {
+    socket.emit('buzzer:rejected', { reason: 'NOT_AUTHENTICATED' });
+    return;
+  }
+
   // Synchronous atomic check in the single-threaded Node.js event loop
   if (!isBuzzerActive || buzzerWinner !== null) {
     socket.emit('buzzer:rejected', {
@@ -57,21 +77,21 @@ function handleTeamBuzz(socket, data, io) {
     return;
   }
 
-  // First arrival claims the lock
+  // First arrival claims the lock. Identity comes from the verified
+  // socket session, never from the client payload.
   isBuzzerActive = false;
   buzzerWinner = {
-    teamId: data.teamId,
-    teamName: data.teamName,
-    teamNumber: data.teamNumber,
+    teamId: team.teamId,
+    teamName: team.teamName,
+    teamNumber: team.teamNumber,
     timestamp: Date.now()
   };
 
   // Immediately lock out all other teams
-  io.to('room:teams').emit('buzzer:status', { isOpen: false });
+  io.to(ROOMS.teams).emit('buzzer:status', { isOpen: false });
 
   // Broadcast winner to all screens (Projector, Admin, Teams)
-  io.emit('buzzer:winner', buzzerWinner);
-  io.emit('buzzer:won', buzzerWinner);
+  broadcast(io, 'buzzer:winner', buzzerWinner);
 
   // Notify the winning socket specifically
   socket.emit('buzzer:confirmed', { isWinner: true, timestamp: buzzerWinner.timestamp });
@@ -85,26 +105,19 @@ function handleTeamBuzz(socket, data, io) {
   });
 }
 
-function registerBuzzerHandlers(socket, io) {
-  socket.on('team:buzz', (data) => {
-    handleTeamBuzz(socket, data, io);
+function registerBuzzerHandlers(socket, io, { onAdmin }) {
+  socket.on('team:buzz', () => {
+    handleTeamBuzz(socket, io);
   });
 
-  socket.on('admin:open-buzzer', () => {
-    openBuzzer(io);
-  });
-
-  socket.on('admin:close-buzzer', () => {
-    closeBuzzer(io);
-  });
-
-  socket.on('admin:reset-buzzer', () => {
-    resetBuzzer(io);
-  });
+  onAdmin('admin:open-buzzer', () => openBuzzer(io));
+  onAdmin('admin:close-buzzer', () => closeBuzzer(io));
+  onAdmin('admin:reset-buzzer', () => resetBuzzer(io));
 }
 
 module.exports = {
   getBuzzerStatus,
+  hydrateBuzzer,
   openBuzzer,
   closeBuzzer,
   resetBuzzer,

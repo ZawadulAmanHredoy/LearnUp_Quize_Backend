@@ -7,7 +7,8 @@ const morgan = require('morgan');
 const mongoose = require('mongoose');
 
 const connectDB = require('./config/db');
-const { initSocket } = require('./config/socket');
+const { initSocket, hydrateRealtimeState } = require('./config/socket');
+const store = require('./utils/store');
 const apiRoutes = require('./routes/api.routes');
 const errorHandler = require('./middleware/errorHandler');
 const AppError = require('./utils/appError');
@@ -22,25 +23,19 @@ app.use(helmet({
 }));
 
 // Static media and assets
-app.use(express.static(path.join(__dirname, 'public')));
 app.use('/media', express.static(path.join(__dirname, 'public/media')));
 
-const allowedOrigins = [
-  process.env.CLIENT_URL || 'http://localhost:5173',
-  'http://localhost:5173',
-  'http://127.0.0.1:5173'
-];
+// CORS: teams' phones reach the frontend via the host laptop's LAN IP
+// (e.g. http://192.168.1.100:5173), which isn't known ahead of time.
+// Auth uses bearer tokens, not cookies, so allowing any origin is safe.
+// Set CLIENT_URL (comma-separated) to restrict it.
+const configuredOrigins = (process.env.CLIENT_URL || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const corsOrigin = process.env.CORS_RESTRICT === 'true' && configuredOrigins.length > 0 ? configuredOrigins : true;
 
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Blocked by CORS policy'));
-    }
-  },
-  credentials: true
-}));
+app.use(cors({ origin: corsOrigin }));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -50,7 +45,7 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 // 2. Initialize Socket.IO
-const io = initSocket(server);
+const io = initSocket(server, { corsOrigin });
 
 // Make io accessible in requests if needed
 app.use((req, res, next) => {
@@ -84,8 +79,14 @@ const PORT = process.env.PORT || 5000;
 
 async function startServer() {
   await connectDB();
+  await store.seedDatabaseIfEmpty();
+  await hydrateRealtimeState();
 
-  server.listen(PORT, () => {
+  if (!process.env.ADMIN_PASSWORD) {
+    console.warn('⚠️  [Auth] ADMIN_PASSWORD not set: default admin login is admin / admin123. Set it in .env before the event.');
+  }
+
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 [Server] Running in ${process.env.NODE_ENV || 'development'} mode on http://localhost:${PORT}`);
     console.log(`🔌 [Socket.IO] Realtime socket ready on port ${PORT}`);
   });

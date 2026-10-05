@@ -9,3 +9,6 @@ yarn-error.log*
 dist
 logs
 *.log
+
+# Auto-generated token signing secret
+.jwt-secret

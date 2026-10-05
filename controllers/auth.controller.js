@@ -1,7 +1,8 @@
 const crypto = require('crypto');
 const Admin = require('../models/Admin');
 const Team = require('../models/Team');
-const { verifyPassword, generateToken, verifyToken } = require('../utils/auth');
+const { verifyPassword, generateToken, verifyToken, extractBearerToken } = require('../utils/auth');
+const { setSession, revokeTeamSockets } = require('../socket/sessions');
 const store = require('../utils/store');
 const AppError = require('../utils/appError');
 
@@ -25,7 +26,7 @@ async function adminLogin(req, res, next) {
       }
     }
 
-    if (!admin && store.memoryStore?.admin?.username === username.toLowerCase().trim()) {
+    if (!admin && !store.isDbConnected() && store.memoryStore?.admin?.username === username.toLowerCase().trim()) {
       if (verifyPassword(password, store.memoryStore.admin.password)) {
         admin = store.memoryStore.admin;
       }
@@ -84,16 +85,17 @@ async function teamLogin(req, res, next) {
 
     // Update team with new activeSessionToken
     await store.updateTeam(team._id, {
-      activeSessionToken: sessionToken,
-      isConnected: true
+      activeSessionToken: sessionToken
     });
 
-    // If socket io instance exists, notify any previous device to disconnect
-    if (req.io) {
-      req.io.to(`team:${team._id}`).emit('auth:session_replaced', {
-        message: 'Your team logged in on another device. This session has been closed.'
-      });
-    }
+    // The newest login wins: kick any phone still on the previous session
+    setSession(team._id, sessionToken);
+    revokeTeamSockets(
+      req.io,
+      team._id,
+      'auth:session_replaced',
+      'Your team logged in on another device. This session has been closed.'
+    );
 
     const token = generateToken({
       teamId: team._id,
@@ -128,13 +130,20 @@ async function teamLogin(req, res, next) {
  */
 async function teamLogout(req, res, next) {
   try {
-    const { teamId } = req.body;
-    if (teamId) {
-      await store.updateTeam(teamId, {
-        activeSessionToken: null,
-        isConnected: false,
-        socketId: null
-      });
+    // Only the phone holding the current session can end it. A phone that was
+    // already replaced must not clear the new phone's session.
+    const decoded = verifyToken(extractBearerToken(req));
+    if (decoded?.role === 'TEAM' && decoded.teamId) {
+      const team = await store.getTeamById(decoded.teamId);
+      if (team && team.activeSessionToken === decoded.sessionToken) {
+        await store.updateTeam(team._id, {
+          activeSessionToken: null,
+          isConnected: false,
+          socketId: null
+        });
+        setSession(team._id, null);
+        revokeTeamSockets(req.io, team._id, 'auth:session_revoked', 'Logged out.');
+      }
     }
 
     res.status(200).json({
@@ -152,12 +161,11 @@ async function teamLogout(req, res, next) {
  */
 async function getMe(req, res, next) {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const token = extractBearerToken(req);
+    if (!token) {
       return next(new AppError('Not authenticated', 401));
     }
 
-    const token = authHeader.split(' ')[1];
     const decoded = verifyToken(token);
 
     if (!decoded) {
@@ -182,7 +190,7 @@ async function getMe(req, res, next) {
       }
 
       // Check single session
-      if (team.activeSessionToken && team.activeSessionToken !== decoded.sessionToken) {
+      if (team.activeSessionToken !== decoded.sessionToken) {
         return res.status(403).json({
           success: false,
           error: 'Session expired or logged in on another device',
