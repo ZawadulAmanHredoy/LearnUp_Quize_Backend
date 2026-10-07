@@ -1,8 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const { getMedia } = require('../controllers/media.controller');
+const mediaController = require('../controllers/media.controller');
 const { requireAdmin } = require('../middleware/auth');
 
-router.get('/', requireAdmin, getMedia);
+// Public streaming
+router.get('/:filename', mediaController.streamMedia);
+
+// Admin-only listing & uploading
+router.get('/', requireAdmin, mediaController.listMedia);
+router.post('/upload', requireAdmin, mediaController.uploadMedia);
 
 module.exports = router;

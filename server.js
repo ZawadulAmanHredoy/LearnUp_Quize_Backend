@@ -14,6 +14,8 @@ const apiRoutes = require('./routes/api.routes');
 const errorHandler = require('./middleware/errorHandler');
 const AppError = require('./utils/appError');
 
+const { syncDiskMediaToDb, streamMediaFile } = require('./utils/mediaGridFs');
+
 const path = require('path');
 const app = express();
 const server = http.createServer(app);
@@ -25,8 +27,18 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
-// Audio-visual round clips: backend/public/media/<file> is served at /media/<file>
-// (express.static supports range requests, so the projector can seek and replay)
+// Audio-visual round clips: Stream directly from MongoDB GridFS with HTTP 206
+// range request support, falling back to backend/public/media/<file>
+app.get('/media/:filename', async (req, res, next) => {
+  try {
+    const handled = await streamMediaFile(req, res, req.params.filename);
+    if (!handled) {
+      next();
+    }
+  } catch (err) {
+    next(err);
+  }
+});
 app.use('/media', express.static(MEDIA_DIR, { fallthrough: false }));
 
 // CORS: teams' phones reach the frontend via the host laptop's LAN IP
@@ -83,6 +95,7 @@ const PORT = process.env.PORT || 5000;
 
 async function startServer() {
   await connectDB();
+  await syncDiskMediaToDb();
   await store.seedDatabaseIfEmpty();
   await hydrateRealtimeState();
 
@@ -92,7 +105,7 @@ async function startServer() {
   });
 
   if (!process.env.ADMIN_PASSWORD) {
-    console.warn('⚠️  [Auth] ADMIN_PASSWORD not set: default admin login is admin / admin123. Set it in .env before the event.');
+    console.warn('⚠️  [Auth] ADMIN_PASSWORD not set: ensure ADMIN_USERNAME and ADMIN_PASSWORD are set in .env');
   }
 
   server.listen(PORT, '0.0.0.0', () => {

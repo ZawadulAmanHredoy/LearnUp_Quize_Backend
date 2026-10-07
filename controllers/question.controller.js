@@ -158,11 +158,34 @@ async function deleteQuestion(req, res, next) {
   }
 }
 
+/**
+ * Delete all questions for a specific round
+ * DELETE /api/v1/questions/round/:roundType
+ */
+async function deleteQuestionsByRound(req, res, next) {
+  try {
+    const { roundType } = req.params;
+    if (!roundType) {
+      return next(new AppError('roundType is required', 400));
+    }
+
+    await store.deleteQuestionsByRound(roundType);
+
+    res.status(200).json({
+      success: true,
+      message: `All questions for ${roundType} deleted successfully`
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getQuestions,
   getQuestionById,
   createQuestion,
   bulkCreateQuestions,
   updateQuestion,
-  deleteQuestion
+  deleteQuestion,
+  deleteQuestionsByRound
 };

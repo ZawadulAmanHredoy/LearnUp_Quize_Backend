@@ -25,7 +25,7 @@ cp .env.example .env
 | Variable | Purpose |
 | :--- | :--- |
 | `MONGODB_URI` | MongoDB connection. If unreachable, the server runs on an in-memory store (state is lost on restart). |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Admin account created on first start when no admin exists. **Set the password before the event**; the fallback is `admin` / `admin123`. |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Admin account stored securely in MongoDB upon initialization. Set in `.env`. |
 | `JWT_SECRET` | Token signing secret. If empty, one is generated into `.jwt-secret` (git-ignored) and reused across restarts. |
 | `CLIENT_URL`, `CORS_RESTRICT` | CORS is open by default so phones can reach the server over the venue LAN. Set `CORS_RESTRICT=true` to allow only `CLIENT_URL` (comma-separated). |
 

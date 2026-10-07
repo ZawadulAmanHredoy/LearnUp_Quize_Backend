@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const Admin = require('../models/Admin');
 const Team = require('../models/Team');
-const { verifyPassword, generateToken, verifyToken, extractBearerToken } = require('../utils/auth');
+const { hashPassword, verifyPassword, generateToken, verifyToken, extractBearerToken } = require('../utils/auth');
 const { setSession, revokeTeamSockets } = require('../socket/sessions');
 const store = require('../utils/store');
 const AppError = require('../utils/appError');
@@ -18,17 +18,20 @@ async function adminLogin(req, res, next) {
       return next(new AppError('Please provide username and password', 400));
     }
 
+    const cleanUser = username.toLowerCase().trim();
+
     let admin = null;
     if (store.isDbConnected()) {
-      const dbAdmin = await Admin.findOne({ username: username.toLowerCase().trim() });
+      const dbAdmin = await Admin.findOne({ username: cleanUser });
       if (dbAdmin && verifyPassword(password, dbAdmin.password)) {
         admin = dbAdmin;
       }
-    }
-
-    if (!admin && !store.isDbConnected() && store.memoryStore?.admin?.username === username.toLowerCase().trim()) {
-      if (verifyPassword(password, store.memoryStore.admin.password)) {
-        admin = store.memoryStore.admin;
+    } else {
+      // Memory store fallback only if DB is completely offline
+      if (store.memoryStore?.admin?.username === cleanUser) {
+        if (verifyPassword(password, store.memoryStore.admin.password)) {
+          admin = store.memoryStore.admin;
+        }
       }
     }
 
@@ -64,16 +67,17 @@ async function adminLogin(req, res, next) {
  */
 async function teamLogin(req, res, next) {
   try {
-    const { teamNumber, pin } = req.body;
+    const { teamId, teamNumber, pin } = req.body;
+    const identifier = teamId || teamNumber;
 
-    if (!teamNumber || !pin) {
-      return next(new AppError('Please provide team number and PIN', 400));
+    if (!identifier || !pin) {
+      return next(new AppError('Please provide Team ID and PIN', 400));
     }
 
-    const team = await store.getTeamByNumber(teamNumber);
+    const team = await store.getTeamByIdentifier(identifier);
 
     if (!team) {
-      return next(new AppError(`Team #${teamNumber} not found`, 404));
+      return next(new AppError(`Team "${identifier}" not found. Please enter your Team ID (e.g. T-01) or Team Number.`, 404));
     }
 
     if (String(team.pin).trim() !== String(pin).trim()) {
@@ -114,6 +118,9 @@ async function teamLogin(req, res, next) {
           id: team._id,
           teamName: team.teamName,
           teamNumber: team.teamNumber,
+          teamId: team.teamId || '',
+          institution: team.institution || '',
+          teamLead: team.teamLead || '',
           score: team.score,
           roundScores: team.roundScores
         }
@@ -206,6 +213,9 @@ async function getMe(req, res, next) {
             id: team._id,
             teamName: team.teamName,
             teamNumber: team.teamNumber,
+            teamId: team.teamId || '',
+            institution: team.institution || '',
+            teamLead: team.teamLead || '',
             score: team.score,
             roundScores: team.roundScores
           }

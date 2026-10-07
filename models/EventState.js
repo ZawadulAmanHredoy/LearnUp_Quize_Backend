@@ -20,6 +20,16 @@ const EventStateSchema = new mongoose.Schema({
     ],
     default: 'WELCOME'
   },
+  welcomeConfig: {
+    title: { type: String, default: 'LearnUp Live Quiz Championship' },
+    subtitle: {
+      type: String,
+      default: 'The grand stage battle between the finest minds.\nBuzzer Battle • Audio-Visual Challenge • Rapid Fire'
+    },
+    badgeText: { type: String, default: 'Ready to Kickoff' },
+    showQr: { type: Boolean, default: true },
+    showTeams: { type: Boolean, default: true }
+  },
   breakConfig: {
     type: {
       type: String,
@@ -68,6 +78,12 @@ const EventStateSchema = new mongoose.Schema({
     correctAnswersCount: { type: Number, default: 0 },
     wrongAnswersCount: { type: Number, default: 0 },
     passedAnswersCount: { type: Number, default: 0 }
+  },
+  mediaSubState: {
+    isPlaying: { type: Boolean, default: false },
+    action: { type: String, default: 'pause' },
+    currentTime: { type: Number, default: 0 },
+    lastUpdated: { type: Number, default: Date.now }
   },
   lastUpdated: {
     type: Date,

@@ -10,6 +10,7 @@ router.get('/', questionController.getQuestions);
 router.get('/:id', questionController.getQuestionById);
 router.post('/', questionController.createQuestion);
 router.post('/bulk', questionController.bulkCreateQuestions);
+router.delete('/round/:roundType', questionController.deleteQuestionsByRound);
 router.put('/:id', questionController.updateQuestion);
 router.delete('/:id', questionController.deleteQuestion);
 

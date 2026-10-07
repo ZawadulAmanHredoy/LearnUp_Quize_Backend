@@ -66,12 +66,56 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
     clearCountdown();
     resetBuzzer(io);
 
-    const updatedState = await store.updateEventState({ currentStage: stage });
-    broadcast(io, 'stage:updated', { stage, metadata, state: updatedState });
+    const STAGE_TO_ROUND_TYPE = {
+      ROUND_BUZZER: 'BUZZER',
+      ROUND_AV: 'AUDIO_VISUAL',
+      ROUND_RAPID_FIRE: 'RAPID_FIRE'
+    };
+
+    const targetRoundType = STAGE_TO_ROUND_TYPE[stage];
+    let updates = { currentStage: stage };
+
+    if (targetRoundType) {
+      const currentState = await store.getEventState();
+      const currentQ = currentState.activeQuestionId
+        ? await store.getQuestionById(currentState.activeQuestionId)
+        : null;
+
+      // Auto-align with valid round question if current activeQuestion belongs to another round
+      if (!currentQ || currentQ.roundType !== targetRoundType) {
+        const roundQuestions = await store.getQuestions({ roundType: targetRoundType });
+        if (roundQuestions.length > 0) {
+          const firstQ = roundQuestions[0];
+          const isMediaFirst = firstQ.roundType === 'AUDIO_VISUAL';
+          updates.activeQuestionId = firstQ._id;
+          updates.currentQuestionIndex = 0;
+          updates.questionSubState = freshQuestionSubState({ isQuestionVisible: !isMediaFirst });
+        }
+      }
+    }
+
+    const updatedState = await store.updateEventState(updates);
+    const activeQuestion = updatedState.activeQuestionId
+      ? await store.getQuestionById(updatedState.activeQuestionId)
+      : null;
+
+    broadcast(io, 'stage:updated', { stage, metadata, state: updatedState, activeQuestion });
+    broadcast(io, 'stage:changed', { stage, metadata, state: updatedState, activeQuestion });
+  });
+
+  // 1b. WELCOME SCREEN CONFIGURATION
+  onAdmin('admin:update-welcome', async ({ welcomeConfig } = {}) => {
+    if (!welcomeConfig || typeof welcomeConfig !== 'object') {
+      notice('Invalid welcome configuration');
+      return;
+    }
+    const updatedState = await store.updateEventState({ welcomeConfig });
+    broadcast(io, 'welcome:updated', updatedState.welcomeConfig);
+    broadcast(io, 'stage:updated', { stage: updatedState.currentStage, state: updatedState });
   });
 
   // 2. BREAK SCREENS
-  onAdmin('admin:set-break', async ({ breakType = 'INTERMISSION', durationMinutes = 15, message } = {}) => {
+  onAdmin('admin:set-break', async ({ breakType = 'INTERMISSION', message } = {}) => {
     const type = BREAK_TYPES.includes(breakType) ? breakType : 'INTERMISSION';
     const breakMessages = {
       PRAYER: 'Prayer Break — We will resume in a short while.',
@@ -84,7 +128,7 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
       type,
       message: (typeof message === 'string' && message.trim()) || breakMessages[type],
       startedAt: new Date(),
-      durationMinutes: Math.min(Math.max(Number(durationMinutes) || 15, 1), 240)
+      durationMinutes: null
     };
 
     clearCountdown();
@@ -103,6 +147,7 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
     const updatedState = await store.updateEventState({ currentStage: stage });
 
     broadcast(io, 'stage:updated', { stage, state: updatedState });
+    broadcast(io, 'stage:changed', { stage, state: updatedState });
     broadcast(io, 'break:ended', { nextStage: stage });
   });
 
@@ -121,22 +166,30 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
 
     const isMediaFirst = question.roundType === 'AUDIO_VISUAL';
     const questionSubState = freshQuestionSubState({ isQuestionVisible: !isMediaFirst });
+    const mediaSubState = {
+      isPlaying: false,
+      action: 'pause',
+      currentTime: 0,
+      lastUpdated: Date.now()
+    };
 
     await store.updateEventState({
       activeQuestionId: question._id,
       currentQuestionIndex: Number.isInteger(questionIndex) ? questionIndex : 0,
-      questionSubState
+      questionSubState,
+      mediaSubState
     });
 
     broadcast(io, 'question:presented', {
       questionId: question._id,
       questionIndex,
       question,
-      questionSubState
+      questionSubState,
+      mediaSubState
     });
   });
 
-  // 3b. SHOW QUESTION & OPTIONS (after AV media has played)
+  // 3b. SHOW QUESTION (Options remain hidden until admin reveals them one by one)
   onAdmin('admin:show-question', async () => {
     const state = await store.getEventState();
     const question = await store.getQuestionById(state.activeQuestionId);
@@ -145,17 +198,30 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
       return;
     }
 
-    const revealed = (question.options || []).map((_, idx) => idx);
     const updatedState = await store.updateEventState({
       questionSubState: {
         isQuestionVisible: true,
-        revealedOptions: revealed,
-        areAllOptionsVisible: true
+        revealedOptions: [],
+        areAllOptionsVisible: false
       }
     });
 
     broadcast(io, 'question:shown', { questionSubState: updatedState.questionSubState });
-    broadcast(io, 'options:updated', { revealedIndices: revealed, allRevealed: true });
+    broadcast(io, 'options:updated', { revealedIndices: [], allRevealed: false });
+  });
+
+  // 3c. LOAD / PRELOAD MEDIA FOR AV ROUND (Zero-buffering cache)
+  onAdmin('admin:load-media', async () => {
+    const avQuestions = await store.getQuestions({ roundType: 'AUDIO_VISUAL' });
+    const mediaUrls = avQuestions
+      .map((q) => q.mediaUrl)
+      .filter(Boolean);
+
+    broadcast(io, 'media:preload', {
+      mediaUrls,
+      count: mediaUrls.length,
+      timestamp: Date.now()
+    });
   });
 
   // 4. REVEAL OPTION(S)
@@ -336,12 +402,20 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
   });
 
   // 8. AUDIO-VISUAL REMOTE PLAYBACK CONTROLS
-  onAdmin('admin:media-control', ({ action, time = 0 } = {}) => {
+  onAdmin('admin:media-control', async ({ action, time = 0 } = {}) => {
     if (!MEDIA_ACTIONS.includes(action)) {
       notice(`Unknown media action: ${action}`);
       return;
     }
-    broadcast(io, 'media:sync', { action, time: Number(time) || 0, timestamp: Date.now() });
+    const isPlaying = action === 'play' || action === 'replay';
+    const mediaSubState = {
+      isPlaying,
+      action,
+      currentTime: Number(time) || 0,
+      lastUpdated: Date.now()
+    };
+    await store.updateEventState({ mediaSubState });
+    broadcast(io, 'media:sync', { action, time: Number(time) || 0, timestamp: Date.now(), mediaSubState });
   });
 
   // 9. SET ACTIVE TEAM TURN (for AV turn rotation)
@@ -365,6 +439,42 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
 
     broadcast(io, 'stage:updated', { stage: 'FINAL_WINNER', state: updatedState });
     broadcast(io, 'winner:celebration', result);
+  });
+
+  // 11. MANUAL SCORE OVERRIDE & ADJUSTMENT FOR LEADERBOARD
+  onAdmin('admin:update-team-score', async ({ teamId, score, roundScores, delta, roundType } = {}) => {
+    try {
+      const team = await store.getTeamById(teamId);
+      if (!team) {
+        notice('Team not found');
+        return;
+      }
+
+      let updated;
+      if (delta !== undefined && Number.isFinite(Number(delta))) {
+        updated = await store.adjustTeamScore(teamId, Number(delta), roundType || 'buzzer');
+      } else {
+        const updates = {};
+        if (score !== undefined) updates.score = Number(score);
+        if (roundScores && typeof roundScores === 'object') {
+          updates.roundScores = {
+            buzzer: Number(roundScores.buzzer ?? team.roundScores?.buzzer ?? 0),
+            audioVisual: Number(roundScores.audioVisual ?? team.roundScores?.audioVisual ?? 0),
+            rapidFire: Number(roundScores.rapidFire ?? team.roundScores?.rapidFire ?? 0),
+          };
+          if (score === undefined) {
+            updates.score = updates.roundScores.buzzer + updates.roundScores.audioVisual + updates.roundScores.rapidFire;
+          }
+        }
+        updated = await store.updateTeam(teamId, updates);
+      }
+
+      const allTeams = await store.getTeams();
+      broadcast(io, 'leaderboard:update', allTeams);
+      notice(`Score updated for ${team.teamName}`);
+    } catch (err) {
+      notice(`Failed to update score: ${err.message}`);
+    }
   });
 }
 

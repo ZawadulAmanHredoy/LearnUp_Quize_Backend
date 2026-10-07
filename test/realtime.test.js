@@ -65,11 +65,14 @@ async function loadBuzzerQuestion(admin, index = 0) {
 before(async () => {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
-  const { json } = await api('/auth/admin/login', {
+  let { json } = await api('/auth/admin/login', {
     method: 'POST',
-    body: { username: 'admin', password: 'admin123' }
+    body: {
+      username: process.env.ADMIN_USERNAME || 'planpostadmin',
+      password: process.env.ADMIN_PASSWORD || 'Pl@npost@!admin'
+    }
   });
-  adminToken = json.data.token;
+  adminToken = json?.data?.token;
 });
 
 after(async () => {

@@ -8,8 +8,8 @@ const EventState = require('../models/EventState');
 const { hashPassword } = require('./auth');
 
 const QUESTIONS_JSON_PATH = path.join(__dirname, '../data/questions.json');
-const DEFAULT_ADMIN_USERNAME = (process.env.ADMIN_USERNAME || 'admin').toLowerCase().trim();
-const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+const DEFAULT_ADMIN_USERNAME = (process.env.ADMIN_USERNAME || 'planpostadmin').toLowerCase().trim();
+const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Pl@npost@!admin';
 
 function loadCodebaseQuestions() {
   try {
@@ -246,6 +246,9 @@ const SEED_TEAMS = [
     _id: 'team_1',
     teamName: 'Team Alpha (Titans)',
     teamNumber: 1,
+    teamId: 'T-01',
+    institution: 'BUFT',
+    teamLead: 'Lead Alpha',
     pin: '1001',
     score: 0,
     roundScores: { buzzer: 0, audioVisual: 0, rapidFire: 0 },
@@ -257,6 +260,9 @@ const SEED_TEAMS = [
     _id: 'team_2',
     teamName: 'Team Beta (Vipers)',
     teamNumber: 2,
+    teamId: 'T-02',
+    institution: 'BUFT',
+    teamLead: 'Lead Beta',
     pin: '1002',
     score: 0,
     roundScores: { buzzer: 0, audioVisual: 0, rapidFire: 0 },
@@ -268,6 +274,9 @@ const SEED_TEAMS = [
     _id: 'team_3',
     teamName: 'Team Gamma (Hawks)',
     teamNumber: 3,
+    teamId: 'T-03',
+    institution: 'BUFT',
+    teamLead: 'Lead Gamma',
     pin: '1003',
     score: 0,
     roundScores: { buzzer: 0, audioVisual: 0, rapidFire: 0 },
@@ -279,6 +288,9 @@ const SEED_TEAMS = [
     _id: 'team_4',
     teamName: 'Team Delta (Cyber)',
     teamNumber: 4,
+    teamId: 'T-04',
+    institution: 'BUFT',
+    teamLead: 'Lead Delta',
     pin: '1004',
     score: 0,
     roundScores: { buzzer: 0, audioVisual: 0, rapidFire: 0 },
@@ -290,6 +302,9 @@ const SEED_TEAMS = [
     _id: 'team_5',
     teamName: 'Team Epsilon (Quantum)',
     teamNumber: 5,
+    teamId: 'T-05',
+    institution: 'BUFT',
+    teamLead: 'Lead Epsilon',
     pin: '1005',
     score: 0,
     roundScores: { buzzer: 0, audioVisual: 0, rapidFire: 0 },
@@ -301,6 +316,9 @@ const SEED_TEAMS = [
     _id: 'team_6',
     teamName: 'Team Zeta (Falcons)',
     teamNumber: 6,
+    teamId: 'T-06',
+    institution: 'BUFT',
+    teamLead: 'Lead Zeta',
     pin: '1006',
     score: 0,
     roundScores: { buzzer: 0, audioVisual: 0, rapidFire: 0 },
@@ -323,6 +341,13 @@ const memoryStore = {
   eventState: {
     eventId: 'learnup-live-event-2026',
     currentStage: 'WELCOME',
+    welcomeConfig: {
+      title: 'LearnUp Live Quiz Championship',
+      subtitle: 'The grand stage battle between the finest minds.\nBuzzer Battle • Audio-Visual Challenge • Rapid Fire',
+      badgeText: 'Ready to Kickoff',
+      showQr: true,
+      showTeams: true
+    },
     breakConfig: {
       type: 'INTERMISSION',
       message: 'Short Intermission — The quiz will resume shortly.',
@@ -353,6 +378,12 @@ const memoryStore = {
       correctAnswersCount: 0,
       wrongAnswersCount: 0,
       passedAnswersCount: 0
+    },
+    mediaSubState: {
+      isPlaying: false,
+      action: 'pause',
+      currentTime: 0,
+      lastUpdated: Date.now()
     },
     lastUpdated: new Date()
   }
@@ -387,9 +418,11 @@ async function hydrateEventState() {
       memoryStore.eventState = {
         ...memoryStore.eventState,
         ...stripMongoMeta(state),
+        welcomeConfig: { ...memoryStore.eventState.welcomeConfig, ...(state.welcomeConfig || {}) },
         questionSubState: { ...memoryStore.eventState.questionSubState, ...(state.questionSubState || {}) },
         breakConfig: { ...memoryStore.eventState.breakConfig, ...(state.breakConfig || {}) },
-        rapidFireSubState: { ...memoryStore.eventState.rapidFireSubState, ...(state.rapidFireSubState || {}) }
+        rapidFireSubState: { ...memoryStore.eventState.rapidFireSubState, ...(state.rapidFireSubState || {}) },
+        mediaSubState: { ...memoryStore.eventState.mediaSubState, ...(state.mediaSubState || {}) }
       };
     } else {
       await EventState.create(memoryStore.eventState);
@@ -438,6 +471,9 @@ function updateEventState(updates) {
   memoryStore.eventState = {
     ...current,
     ...updates,
+    welcomeConfig: updates.welcomeConfig
+      ? { ...current.welcomeConfig, ...updates.welcomeConfig }
+      : current.welcomeConfig,
     questionSubState: updates.questionSubState
       ? { ...current.questionSubState, ...updates.questionSubState }
       : current.questionSubState,
@@ -458,14 +494,21 @@ async function resetEventState() {
   const freshState = {
     eventId: 'learnup-live-event-2026',
     currentStage: 'WELCOME',
+    welcomeConfig: {
+      title: 'LearnUp Live Quiz Championship',
+      subtitle: 'The grand stage battle between the finest minds.\nBuzzer Battle • Audio-Visual Challenge • Rapid Fire',
+      badgeText: 'Ready to Kickoff',
+      showQr: true,
+      showTeams: true
+    },
     breakConfig: {
       type: 'INTERMISSION',
       message: 'Short Intermission',
       startedAt: null,
-      durationMinutes: 15
+      durationMinutes: null
     },
     currentQuestionIndex: 0,
-    activeQuestionId: (await getQuestions())[0]?._id || null,
+    activeQuestionId: (await getQuestions({ roundType: 'BUZZER' }))[0]?._id || (await getQuestions())[0]?._id || null,
     questionSubState: {
       isQuestionVisible: false,
       revealedOptions: [],
@@ -593,6 +636,20 @@ async function deleteQuestion(id) {
   return deleted;
 }
 
+async function deleteQuestionsByRound(roundType) {
+  const normRound = String(roundType || '').toUpperCase();
+  memoryStore.questions = memoryStore.questions.filter((q) => q.roundType !== normRound);
+
+  if (isDbConnected()) {
+    try {
+      await Question.deleteMany({ roundType: normRound });
+    } catch (err) {
+      console.warn('[Store] DB deleteQuestionsByRound failed:', err.message);
+    }
+  }
+  return true;
+}
+
 async function bulkCreateQuestions(questionsArray) {
   const created = [];
   for (const q of questionsArray) {
@@ -638,13 +695,51 @@ async function getTeamByNumber(teamNumber) {
   return memoryStore.teams.find((t) => Number(t.teamNumber) === Number(teamNumber));
 }
 
+async function getTeamByIdentifier(identifier) {
+  if (!identifier) return null;
+  const idStr = String(identifier).trim();
+  const num = Number(idStr);
+
+  if (isDbConnected()) {
+    try {
+      const orConditions = [
+        { teamId: { $regex: new RegExp(`^${idStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }
+      ];
+      if (Number.isInteger(num)) {
+        orConditions.push({ teamNumber: num });
+      }
+      if (mongoose.isValidObjectId(idStr)) {
+        orConditions.push({ _id: idStr });
+      }
+      const t = await Team.findOne({ $or: orConditions }).lean();
+      if (t) return t;
+    } catch (err) {}
+  }
+
+  // Fallback to memory store
+  return memoryStore.teams.find((t) => {
+    if (t.teamId && t.teamId.toLowerCase() === idStr.toLowerCase()) return true;
+    if (Number.isInteger(num) && Number(t.teamNumber) === num) return true;
+    if (String(t._id) === idStr) return true;
+    return false;
+  });
+}
+
 async function createTeam(data) {
   let created = null;
+  const num = Number(data.teamNumber);
+  const teamIdCode = data.teamId ? String(data.teamId).trim() : `T-${String(num).padStart(2, '0')}`;
+  const institution = data.institution ? String(data.institution).trim() : '';
+  const teamLead = data.teamLead ? String(data.teamLead).trim() : '';
+
   if (isDbConnected()) {
     try {
       created = await Team.create({
         teamName: data.teamName,
-        teamNumber: Number(data.teamNumber),
+        teamNumber: num,
+        teamId: teamIdCode,
+        institution,
+        teamLead,
         pin: String(data.pin)
       });
     } catch (err) {
@@ -655,7 +750,10 @@ async function createTeam(data) {
   const newTeam = {
     _id: created ? String(created._id) : (data._id || 'team_' + Date.now()),
     teamName: data.teamName,
-    teamNumber: Number(data.teamNumber),
+    teamNumber: num,
+    teamId: teamIdCode,
+    institution,
+    teamLead,
     pin: String(data.pin),
     score: 0,
     roundScores: { buzzer: 0, audioVisual: 0, rapidFire: 0 },
@@ -665,7 +763,14 @@ async function createTeam(data) {
     createdAt: new Date()
   };
 
-  memoryStore.teams.push(newTeam);
+  const existingIndex = memoryStore.teams.findIndex(
+    (t) => String(t._id) === String(newTeam._id) || Number(t.teamNumber) === Number(newTeam.teamNumber)
+  );
+  if (existingIndex !== -1) {
+    memoryStore.teams[existingIndex] = newTeam;
+  } else {
+    memoryStore.teams.push(newTeam);
+  }
   return created ? created.toObject() : newTeam;
 }
 
@@ -782,15 +887,15 @@ async function seedDatabaseIfEmpty() {
   if (!isDbConnected()) return;
 
   try {
-    const adminCount = await Admin.countDocuments();
-    if (adminCount === 0) {
-      await Admin.create({
-        username: DEFAULT_ADMIN_USERNAME,
-        password: hashPassword(DEFAULT_ADMIN_PASSWORD),
-        role: 'SUPER_ADMIN'
-      });
-      console.log(`✅ [Seed] Default Admin created: ${DEFAULT_ADMIN_USERNAME}`);
-    }
+    // Ensure admin credentials from environment are saved and active in DB
+    const adminUsername = DEFAULT_ADMIN_USERNAME;
+    const adminPassword = DEFAULT_ADMIN_PASSWORD;
+    await Admin.findOneAndUpdate(
+      { username: adminUsername },
+      { username: adminUsername, password: hashPassword(adminPassword), role: 'SUPER_ADMIN' },
+      { upsert: true, new: true }
+    );
+    console.log(`✅ [Seed] Admin account ensured in DB: ${adminUsername}`);
 
     const teamCount = await Team.countDocuments();
     if (teamCount === 0) {
@@ -798,7 +903,24 @@ async function seedDatabaseIfEmpty() {
         const { _id, ...teamDoc } = t;
         await Team.create(teamDoc);
       }
-      console.log('✅ [Seed] Default Teams created (Alpha to Zeta)');
+      console.log('✅ [Seed] Default BUFT Teams created (Alpha to Zeta)');
+    } else {
+      // Ensure existing teams have a teamId and institution if missing
+      const existingTeams = await Team.find({});
+      for (const t of existingTeams) {
+        let changed = false;
+        if (!t.teamId) {
+          t.teamId = `T-${String(t.teamNumber).padStart(2, '0')}`;
+          changed = true;
+        }
+        if (!t.institution) {
+          t.institution = 'BUFT';
+          changed = true;
+        }
+        if (changed) {
+          await t.save();
+        }
+      }
     }
 
     // Synchronize questions from codebase questions.json
@@ -848,10 +970,12 @@ module.exports = {
   createQuestion,
   updateQuestion,
   deleteQuestion,
+  deleteQuestionsByRound,
   bulkCreateQuestions,
   getTeams,
   getTeamById,
   getTeamByNumber,
+  getTeamByIdentifier,
   createTeam,
   updateTeam,
   deleteTeam,
