@@ -27,6 +27,8 @@ cp .env.example .env
 | `MONGODB_URI` | MongoDB connection. If unreachable, the server runs on an in-memory store (state is lost on restart). |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Admin account created on first start when no admin exists. **Set the password before the event**; the fallback is `admin` / `admin123`. |
 | `JWT_SECRET` | Token signing secret. If empty, one is generated into `.jwt-secret` (git-ignored) and reused across restarts. |
+| `MAX_UPLOAD_MB` | Largest media upload in MB (default 200). |
+| `MEDIA_CACHE_DIR` | Where the server keeps its local copy of uploaded media (default `media-cache/`). |
 | `CLIENT_URL`, `CORS_RESTRICT` | CORS is open by default so phones can reach the server over the venue LAN. Set `CORS_RESTRICT=true` to allow only `CLIENT_URL` (comma-separated). |
 
 ### 3. Run Development Server
@@ -39,31 +41,18 @@ The server listens on `0.0.0.0:5000`, so phones on the same Wi-Fi can reach it a
 ```bash
 npm test
 ```
-Covers admin-only access, answer-key hiding, the 10-phone simultaneous buzz (exactly one winner), single-device sessions, server-side scoring, rapid fire, crash recovery of the live state, and tie detection.
+Covers admin-only access, answer-key hiding, the 10-phone simultaneous buzz (exactly one winner), single-device sessions, server-side scoring, rapid fire, crash recovery of the live state, tie detection, question validation/reorder/import/export, and media upload, streaming and delete rules. Tests run without MongoDB (in-memory store); the GridFS path needs a real database.
 
-## Audio-Visual Round Media
-All clips live in **`public/media/`** in this repo and are served at `http://<server>:5000/media/<file>`. The projector loads them from there, so adding a clip never needs a frontend change.
+## Question Bank & Media
+Questions and media are managed from the admin website (**Questions Bank** in the sidebar): create, edit, delete and reorder questions per round, and upload clips for the audio-visual round. MongoDB is the source of truth.
 
-To add a clip:
-1. Copy the file into `public/media/`, e.g. `public/media/flag_quiz.mp4`. Use simple file names (no spaces).
-2. Reference it in `data/questions.json`:
-   ```json
-   {
-     "roundType": "AUDIO_VISUAL",
-     "order": 3,
-     "questionText": "Which country's anthem is this?",
-     "mediaType": "AUDIO",
-     "mediaUrl": "/media/flag_quiz.mp3",
-     "options": [{ "label": "A", "text": "..." }, { "label": "B", "text": "..." }, { "label": "C", "text": "..." }, { "label": "D", "text": "..." }],
-     "correctOptionIndex": 1,
-     "points": 15,
-     "negativePoints": 0
-   }
-   ```
-   `mediaType` is `VIDEO`, `AUDIO` or `IMAGE`. A full `https://...` URL also works, but needs internet at the venue.
-3. Restart the server. It logs a warning for any question whose file is missing, the admin's AV deck marks it **⚠ file missing**, and `npm test` fails until the file is there.
-
-Formats: **MP4 (H.264 + AAC)** or **WebM** for video, **MP3** for audio, JPG/PNG/WebP for images. Play the projector in Chrome or Edge. Keep each file well under 100 MB (GitHub's per-file limit); for larger clips use Git LFS or copy them onto the event laptop directly.
+- **First start only:** if the database has no questions, the starter set in `data/questions.json` is loaded and its sample clips (`data/sample-media/`) are uploaded. After that the file is never applied again. Use **Export JSON** / **Import JSON** in the Question Bank for backups.
+- **Media storage:** uploads are stored in MongoDB GridFS (bucket `media`) with a `MediaAsset` record. The server also keeps a copy of every file in `media-cache/` and always serves from there, so playback never waits on the database. After a restart or redeploy the copies are rebuilt from GridFS. Without a database (development), the cache folder is the only copy.
+- **No buffering on stage:** when the admin logs in, the admin's browser downloads every audio-visual clip into local browser storage (IndexedDB), and every connected projector is told to do the same. The projector plays the local copy, so nothing streams during the round. The admin header shows **Clips: projector N/N**, and loading a clip that isn't downloaded yet asks for confirmation.
+- Media ids are content hashes: uploading the same file twice stores it once, and `/media/:id` is cached forever by browsers.
+- A file used by a question can't be deleted, and the question currently on stage can't be deleted.
+- Upload formats: MP4/WebM/MOV video, MP3/WAV/OGG/M4A audio, JPG/PNG/WebP/GIF images. Limit `MAX_UPLOAD_MB` (default 200). Play the projector in Chrome or Edge.
+- **MongoDB Atlas free tier holds 512 MB in total**, so keep clips short and compressed (1080p at a few Mbps is plenty for a projector), or use a paid tier or a local MongoDB for the event.
 
 ## Security Model
 - **Admin** REST routes (`/questions`, `/event/*`, team writes) require `Authorization: Bearer <admin token>`. Admin socket events are ignored unless the socket joined `room:admin` with a valid admin token.
@@ -75,7 +64,9 @@ Formats: **MP4 (H.264 + AAC)** or **WebM** for video, **MP3** for audio, JPG/PNG
 - `GET /health` — server, database and LAN addresses (used for the join QR code)
 - `POST /auth/admin/login`, `POST /auth/team/login`, `POST /auth/team/logout`, `GET /auth/me`
 - `GET /teams` (public: names and scores; admin: includes PINs), `POST /teams`, `PUT /teams/:id`, `DELETE /teams/:id`, `POST /teams/:id/reset-session`, `POST /teams/reset-scores` — admin
-- `GET|POST /questions`, `POST /questions/bulk`, `GET|PUT|DELETE /questions/:id` — admin
+- `GET|POST /questions`, `POST /questions/bulk`, `PUT /questions/reorder`, `GET /questions/export`, `GET|PUT|DELETE /questions/:id` — admin
+- `GET|POST /media` (multipart field `file`), `GET /media/manifest`, `DELETE /media/:id` — admin
+- `GET /media/:id` (outside `/api`) — streams a clip with range support; public so the projector can play it
 - `GET /event/state`, `POST /event/reset`, `POST /event/seed` — admin
 
 ## Socket.IO Events
@@ -83,4 +74,5 @@ Clients first emit `join:room` with `{ role: 'admin' | 'projector' | 'team', tok
 
 - **Admin → server:** `admin:set-stage`, `admin:set-break`, `admin:end-break`, `admin:load-question`, `admin:show-question` (AV: reveal after media), `admin:reveal-option`, `admin:start-countdown`, `admin:lock-answer`, `admin:evaluate` (`{ isCorrect }`; points come from the question), `admin:media-control` (`play`/`pause`/`replay`/`seek`/`mute`/`unmute`), `admin:set-active-team`, `admin:open-buzzer` / `admin:close-buzzer` / `admin:reset-buzzer`, `admin:rapid-fire-start` / `-action` / `-stop`, `admin:announce-winner`
 - **Team → server:** `team:buzz`, `ping:measure`
+- **Media sync:** admin `admin:media-preload` (`{ force }`) → projectors get `media:preload`; projectors report `projector:media-status` → admins get `media:projector-status`; admins and projectors get `media:manifest` on join and whenever the bank changes; admins get `questions:updated`
 - **Server → clients:** `stage:updated`, `break:started`, `break:ended`, `question:presented`, `question:shown`, `options:updated`, `countdown:tick`, `buzzer:status`, `buzzer:unlocked`, `buzzer:winner`, `buzzer:confirmed`, `buzzer:rejected`, `buzzer:reset`, `answer:locked`, `answer:evaluated`, `media:sync`, `turn:updated`, `rapid-fire:started` / `tick` / `update` / `times-up`, `leaderboard:update`, `winner:celebration` (`{ champion, isTie, tiedTeams, standings }`), `radar:status`, `admin:notice`, `auth:error`, `auth:session_replaced`, `auth:session_revoked`

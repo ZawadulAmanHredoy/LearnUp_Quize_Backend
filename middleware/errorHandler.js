@@ -10,13 +10,16 @@ function errorHandler(err, req, res, next) {
       : 'Something went wrong on the server'
   };
 
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'production' && statusCode >= 500) {
     response.stack = err.stack;
   }
 
-  console.error(`[Error] ${statusCode} - ${err.message}`);
-  if (err.stack && process.env.NODE_ENV !== 'production') {
-    console.error(err.stack);
+  // Expected client errors (bad input, auth) get one line; server errors get the stack
+  if (statusCode >= 500) {
+    console.error(`[Error] ${statusCode} - ${err.message}`);
+    if (err.stack && process.env.NODE_ENV !== 'production') console.error(err.stack);
+  } else if (process.env.NODE_ENV !== 'test') {
+    console.warn(`[Request] ${statusCode} - ${err.message}`);
   }
 
   res.status(statusCode).json(response);

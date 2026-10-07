@@ -9,7 +9,9 @@ const mongoose = require('mongoose');
 const connectDB = require('./config/db');
 const { initSocket, hydrateRealtimeState } = require('./config/socket');
 const store = require('./utils/store');
-const { MEDIA_DIR, findMissingMedia } = require('./utils/media');
+const mediaStore = require('./utils/mediaStore');
+const { seedQuestionsIfEmpty, migrateLegacyMediaUrls } = require('./utils/questionSeed');
+const { serveMedia } = require('./controllers/media.controller');
 const apiRoutes = require('./routes/api.routes');
 const errorHandler = require('./middleware/errorHandler');
 const AppError = require('./utils/appError');
@@ -25,9 +27,6 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
-// Audio-visual round clips: backend/public/media/<file> is served at /media/<file>
-// (express.static supports range requests, so the projector can seek and replay)
-app.use('/media', express.static(MEDIA_DIR, { fallthrough: false }));
 
 // CORS: teams' phones reach the frontend via the host laptop's LAN IP
 // (e.g. http://192.168.1.100:5173), which isn't known ahead of time.
@@ -57,6 +56,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Audio-visual clips, streamed from the server's local copy (range requests supported)
+app.get('/media/:id', serveMedia);
+
 // 3. API Routes
 app.use('/api/v1', apiRoutes);
 app.use('/api', apiRoutes); // Convenience alias
@@ -81,15 +83,19 @@ app.use(errorHandler);
 // 6. Server Initialization & Database Connection
 const PORT = process.env.PORT || 5000;
 
+/**
+ * Seed and restore everything the live event needs. Safe to call more than once.
+ */
+async function initializeData() {
+  await store.seedDatabaseIfEmpty();
+  await seedQuestionsIfEmpty();
+  await migrateLegacyMediaUrls();
+  await hydrateRealtimeState();
+}
+
 async function startServer() {
   await connectDB();
-  await store.seedDatabaseIfEmpty();
-  await hydrateRealtimeState();
-
-  const missingMedia = findMissingMedia(await store.getQuestions());
-  missingMedia.forEach((m) => {
-    console.warn(`⚠️  [Media] ${m.roundType} question #${m.order} points at ${m.mediaUrl}, which is not in public/media`);
-  });
+  await initializeData();
 
   if (!process.env.ADMIN_PASSWORD) {
     console.warn('⚠️  [Auth] ADMIN_PASSWORD not set: default admin login is admin / admin123. Set it in .env before the event.');
@@ -99,6 +105,13 @@ async function startServer() {
     console.log(`🚀 [Server] Running in ${process.env.NODE_ENV || 'development'} mode on http://localhost:${PORT}`);
     console.log(`🔌 [Socket.IO] Realtime socket ready on port ${PORT}`);
   });
+
+  // Rebuild the local copy of every clip from MongoDB (after a redeploy the
+  // disk starts empty), so playback never has to wait on the database
+  mediaStore
+    .warmCache()
+    .then(({ total, cached }) => total && console.log(`🎬 [Media] ${cached}/${total} clips ready on local disk`))
+    .catch((err) => console.warn('[Media] Cache warm-up failed:', err.message));
 }
 
 // 7. Graceful Shutdown
@@ -126,4 +139,4 @@ if (require.main === module) {
   startServer();
 }
 
-module.exports = { app, server };
+module.exports = { app, server, initializeData };

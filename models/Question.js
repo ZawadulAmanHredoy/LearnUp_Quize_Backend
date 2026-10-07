@@ -24,6 +24,11 @@ const QuestionSchema = new mongoose.Schema({
     enum: ['NONE', 'IMAGE', 'AUDIO', 'VIDEO'],
     default: 'NONE'
   },
+  // Uploaded clip (MediaAsset / GridFS id). mediaUrl is only used for external https links.
+  mediaId: {
+    type: String,
+    default: null
+  },
   mediaUrl: {
     type: String,
     default: null

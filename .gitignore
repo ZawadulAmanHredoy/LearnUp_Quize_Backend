@@ -12,3 +12,6 @@ logs
 
 # Auto-generated token signing secret
 .jwt-secret
+
+# Local copies of uploaded media (rebuilt from MongoDB GridFS)
+media-cache/

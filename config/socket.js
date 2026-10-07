@@ -7,6 +7,7 @@ const { setSession, isCurrentSession } = require('../socket/sessions');
 const { registerBuzzerHandlers, getBuzzerStatus, hydrateBuzzer } = require('../socket/buzzerHandler');
 const { registerStageHandlers } = require('../socket/stageHandler');
 const { registerRapidFireHandlers, getRapidFireState, hydrateRapidFire } = require('../socket/rapidFireHandler');
+const { registerMediaSyncHandlers, sendMediaStateOnJoin } = require('../socket/mediaSync');
 
 let io = null;
 
@@ -187,6 +188,7 @@ function initSocket(server, { corsOrigin = true } = {}) {
 
         // Rehydrate client with current snapshot on join
         socket.emit('state:sync', await buildSnapshot(socket.data.role));
+        await sendMediaStateOnJoin(socket, socket.data.role);
       } catch (err) {
         console.error('[Socket.IO] join:room failed:', err);
       }
@@ -209,6 +211,7 @@ function initSocket(server, { corsOrigin = true } = {}) {
     registerBuzzerHandlers(socket, io, context);
     registerStageHandlers(socket, io, context);
     registerRapidFireHandlers(socket, io, context);
+    registerMediaSyncHandlers(socket, io, context);
 
     // 4. Disconnect Handler
     socket.on('disconnect', async () => {

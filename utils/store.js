@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
@@ -319,7 +320,7 @@ const memoryStore = {
     role: 'SUPER_ADMIN'
   },
   teams: JSON.parse(JSON.stringify(SEED_TEAMS)),
-  questions: loadCodebaseQuestions() || JSON.parse(JSON.stringify(SEED_QUESTIONS)),
+  questions: [], // filled by seedQuestionsIfEmpty() at startup
   eventState: {
     eventId: 'learnup-live-event-2026',
     currentStage: 'WELCOME',
@@ -501,11 +502,19 @@ async function resetEventState() {
 // -------------------------------------------------------------
 // QUESTION OPERATIONS
 // -------------------------------------------------------------
+function sortQuestions(list) {
+  const roundRank = { BUZZER: 0, AUDIO_VISUAL: 1, RAPID_FIRE: 2 };
+  return [...list].sort(
+    (a, b) => (roundRank[a.roundType] ?? 9) - (roundRank[b.roundType] ?? 9) || (a.order || 0) - (b.order || 0)
+  );
+}
+
+// With a database, MongoDB is the only source of questions; the in-memory
+// list is used only when no database is connected.
 async function getQuestions(filter = {}) {
   if (isDbConnected()) {
     try {
-      const q = await Question.find(filter).sort({ roundType: 1, order: 1 }).lean();
-      if (q && q.length > 0) return q;
+      return sortQuestions(await Question.find(filter).lean());
     } catch (err) {
       console.warn('[Store] DB questions read failed:', err.message);
     }
@@ -515,89 +524,98 @@ async function getQuestions(filter = {}) {
   if (filter.roundType) {
     list = list.filter((item) => item.roundType === filter.roundType);
   }
-  return list.sort((a, b) => (a.order || 0) - (b.order || 0));
+  if (filter.mediaId) {
+    list = list.filter((item) => item.mediaId === filter.mediaId);
+  }
+  return sortQuestions(list);
 }
 
 async function getQuestionById(id) {
-  if (isDbConnected() && mongoose.isValidObjectId(id)) {
+  if (isDbConnected()) {
+    if (!mongoose.isValidObjectId(id)) return null;
     try {
-      const q = await Question.findById(id).lean();
-      if (q) return q;
-    } catch (err) {}
+      return await Question.findById(id).lean();
+    } catch (err) {
+      return null;
+    }
   }
   return memoryStore.questions.find((q) => String(q._id) === String(id)) || null;
 }
 
-async function createQuestion(data) {
-  const newQ = {
-    _id: data._id || 'q_' + Date.now(),
-    ...data,
-    createdAt: new Date(),
-    updatedAt: new Date()
-  };
+async function nextQuestionOrder(roundType) {
+  const list = await getQuestions({ roundType });
+  return list.reduce((max, q) => Math.max(max, q.order || 0), 0) + 1;
+}
 
-  memoryStore.questions.push(newQ);
+async function createQuestion(data) {
+  const doc = { ...data };
+  delete doc._id;
+  if (!doc.order) doc.order = await nextQuestionOrder(doc.roundType);
 
   if (isDbConnected()) {
-    try {
-      return await Question.create(data);
-    } catch (err) {
-      console.warn('[Store] DB question create failed:', err.message);
-    }
+    const created = await Question.create(doc);
+    return created.toObject();
   }
 
+  const newQ = { _id: `q_${crypto.randomUUID().slice(0, 8)}`, ...doc, createdAt: new Date(), updatedAt: new Date() };
+  memoryStore.questions.push(newQ);
   return newQ;
 }
 
 async function updateQuestion(id, updates) {
-  const { _id, createdAt, ...safeUpdates } = updates;
+  const { _id, createdAt, updatedAt, ...safeUpdates } = updates;
+
+  if (isDbConnected()) {
+    if (!mongoose.isValidObjectId(id)) return null;
+    return Question.findByIdAndUpdate(id, { $set: safeUpdates }, { new: true, runValidators: true }).lean();
+  }
+
   const index = memoryStore.questions.findIndex((q) => String(q._id) === String(id));
-  if (index !== -1) {
-    memoryStore.questions[index] = {
-      ...memoryStore.questions[index],
-      ...safeUpdates,
-      updatedAt: new Date()
-    };
-  }
-
-  if (isDbConnected() && mongoose.isValidObjectId(id)) {
-    try {
-      const updated = await Question.findByIdAndUpdate(
-        id,
-        { $set: safeUpdates },
-        { new: true, runValidators: true }
-      ).lean();
-      if (updated) return updated;
-    } catch (err) {
-      console.warn('[Store] DB question update failed:', err.message);
-      throw err;
-    }
-  }
-
-  return index !== -1 ? memoryStore.questions[index] : null;
+  if (index === -1) return null;
+  memoryStore.questions[index] = { ...memoryStore.questions[index], ...safeUpdates, updatedAt: new Date() };
+  return memoryStore.questions[index];
 }
 
 async function deleteQuestion(id) {
+  if (isDbConnected()) {
+    if (!mongoose.isValidObjectId(id)) return false;
+    return Boolean(await Question.findByIdAndDelete(id));
+  }
+
   const before = memoryStore.questions.length;
   memoryStore.questions = memoryStore.questions.filter((q) => String(q._id) !== String(id));
-  let deleted = memoryStore.questions.length !== before;
+  return memoryStore.questions.length !== before;
+}
 
-  if (isDbConnected() && mongoose.isValidObjectId(id)) {
-    try {
-      const result = await Question.findByIdAndDelete(id);
-      deleted = deleted || Boolean(result);
-    } catch (err) {
-      console.warn('[Store] DB question delete failed:', err.message);
-    }
+/**
+ * Set the running order of a round to the given id sequence (1, 2, 3, ...)
+ */
+async function reorderQuestions(roundType, orderedIds) {
+  const roundQuestions = await getQuestions({ roundType });
+  const known = new Set(roundQuestions.map((q) => String(q._id)));
+  const ids = orderedIds.map(String).filter((id) => known.has(id));
+  // Questions missing from the list keep their relative order at the end
+  roundQuestions.forEach((q) => {
+    if (!ids.includes(String(q._id))) ids.push(String(q._id));
+  });
+
+  for (const [idx, id] of ids.entries()) {
+    await updateQuestion(id, { order: idx + 1 });
   }
-  return deleted;
+  return getQuestions({ roundType });
+}
+
+async function countQuestionsUsingMedia(mediaId) {
+  if (isDbConnected()) {
+    return Question.countDocuments({ mediaId });
+  }
+  return memoryStore.questions.filter((q) => q.mediaId === mediaId).length;
 }
 
 async function bulkCreateQuestions(questionsArray) {
   const created = [];
   for (const q of questionsArray) {
-    const item = await createQuestion(q);
-    created.push(item);
+    created.push(await createQuestion(q));
   }
   return created;
 }
@@ -801,33 +819,6 @@ async function seedDatabaseIfEmpty() {
       console.log('✅ [Seed] Default Teams created (Alpha to Zeta)');
     }
 
-    // Synchronize questions from codebase questions.json
-    const fileQuestions = loadCodebaseQuestions();
-    if (fileQuestions) {
-      try {
-        for (const q of fileQuestions) {
-          const { _id, ...qDoc } = q;
-          await Question.findOneAndUpdate(
-            { roundType: q.roundType, order: q.order },
-            { $set: qDoc },
-            { upsert: true, new: true }
-          );
-        }
-        console.log('✅ [Seed] Questions synchronized with codebase questions.json');
-      } catch (err) {
-        console.warn('[Seed] Could not sync questions from file:', err.message);
-      }
-    } else {
-      const questionCount = await Question.countDocuments();
-      if (questionCount === 0) {
-        for (const q of SEED_QUESTIONS) {
-          const { _id, ...qDoc } = q;
-          await Question.create(qDoc);
-        }
-        console.log('✅ [Seed] Default Questions created across all rounds');
-      }
-    }
-
     await hydrateEventState();
   } catch (err) {
     console.warn('[Store] DB seed notice:', err.message);
@@ -849,6 +840,10 @@ module.exports = {
   updateQuestion,
   deleteQuestion,
   bulkCreateQuestions,
+  reorderQuestions,
+  countQuestionsUsingMedia,
+  loadCodebaseQuestions,
+  SEED_QUESTIONS,
   getTeams,
   getTeamById,
   getTeamByNumber,

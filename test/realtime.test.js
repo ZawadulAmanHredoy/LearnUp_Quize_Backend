@@ -1,10 +1,11 @@
 process.env.NODE_ENV = 'test';
 process.env.MONGODB_URI = 'mongodb://127.0.0.1:1/unused';
+process.env.MEDIA_CACHE_DIR = require('path').join(require('os').tmpdir(), 'learnup-test-media-' + process.pid);
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { io: ioClient } = require('socket.io-client');
-const { server } = require('../server');
+const { server, initializeData } = require('../server');
 
 let baseUrl;
 let adminToken;
@@ -63,6 +64,7 @@ async function loadBuzzerQuestion(admin, index = 0) {
 }
 
 before(async () => {
+  await initializeData();
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
   const { json } = await api('/auth/admin/login', {
