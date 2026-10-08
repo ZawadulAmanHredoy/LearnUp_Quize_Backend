@@ -69,9 +69,12 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${server.address().port}`;
   const { json } = await api('/auth/admin/login', {
     method: 'POST',
-    body: { username: 'admin', password: 'admin123' }
+    body: {
+      username: process.env.ADMIN_USERNAME || 'admin',
+      password: process.env.ADMIN_PASSWORD || 'admin123'
+    }
   });
-  adminToken = json.data.token;
+  adminToken = json?.data?.token;
 });
 
 after(async () => {

@@ -3,8 +3,25 @@ const AppError = require('../utils/appError');
 const { forAdmin, forPublic } = require('../utils/sanitize');
 const { setSession, revokeTeamSockets } = require('../socket/sessions');
 const { broadcast } = require('../socket/broadcast');
+const { applyManualScore } = require('../utils/teamScores');
 
-const UPDATABLE_TEAM_FIELDS = ['teamName', 'teamNumber', 'pin'];
+const UPDATABLE_TEAM_FIELDS = ['teamName', 'teamNumber', 'teamId', 'institution', 'teamLead', 'pin'];
+
+/**
+ * Teams log in with their number or Team ID, so both must be unique.
+ * Returns an AppError for a clash with another team, or null.
+ */
+async function findIdentityConflict({ teamNumber, teamId }, exceptId = null) {
+  const others = (await store.getTeams()).filter((t) => String(t._id) !== String(exceptId));
+  if (teamNumber !== undefined && others.some((t) => Number(t.teamNumber) === Number(teamNumber))) {
+    return new AppError(`Team #${teamNumber} already exists`, 409);
+  }
+  const wantedId = String(teamId || '').trim().toLowerCase();
+  if (wantedId && others.some((t) => String(t.teamId || '').toLowerCase() === wantedId)) {
+    return new AppError(`Team ID "${teamId}" is already used by another team`, 409);
+  }
+  return null;
+}
 
 /**
  * Get all teams with current scores and status
@@ -30,7 +47,7 @@ async function getTeams(req, res, next) {
  */
 async function createTeam(req, res, next) {
   try {
-    const { teamName, teamNumber, pin } = req.body;
+    const { teamName, teamNumber, teamId, institution, teamLead, pin } = req.body;
 
     if (!String(teamName || '').trim() || !teamNumber || !String(pin || '').trim()) {
       return next(new AppError('Please provide teamName, teamNumber, and pin', 400));
@@ -39,14 +56,18 @@ async function createTeam(req, res, next) {
       return next(new AppError('teamNumber must be a positive whole number', 400));
     }
 
-    const existing = await store.getTeamByNumber(teamNumber);
-    if (existing) {
-      return next(new AppError(`Team #${teamNumber} already exists`, 409));
-    }
+    const conflict = await findIdentityConflict({
+      teamNumber: Number(teamNumber),
+      teamId: teamId || `T-${String(teamNumber).padStart(2, '0')}`
+    });
+    if (conflict) return next(conflict);
 
     const newTeam = await store.createTeam({
       teamName: String(teamName).trim(),
       teamNumber: Number(teamNumber),
+      teamId: String(teamId || '').trim(),
+      institution: String(institution || '').trim(),
+      teamLead: String(teamLead || '').trim(),
       pin: String(pin).trim()
     });
 
@@ -92,22 +113,69 @@ async function deleteTeam(req, res, next) {
  */
 async function updateTeam(req, res, next) {
   try {
-    // Only profile fields are editable here; scores and sessions have their own endpoints
+    const team = await store.getTeamById(req.params.id);
+    if (!team) {
+      return next(new AppError('Team not found', 404));
+    }
+
     const updates = {};
     for (const field of UPDATABLE_TEAM_FIELDS) {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
     }
-    if (updates.teamNumber !== undefined) updates.teamNumber = Number(updates.teamNumber);
-    if (updates.pin !== undefined) updates.pin = String(updates.pin).trim();
+    for (const field of ['teamName', 'teamId', 'institution', 'teamLead', 'pin']) {
+      if (updates[field] !== undefined) updates[field] = String(updates[field]).trim();
+    }
+    if (updates.teamNumber !== undefined) {
+      updates.teamNumber = Number(updates.teamNumber);
+      if (!Number.isInteger(updates.teamNumber) || updates.teamNumber < 1) {
+        return next(new AppError('teamNumber must be a positive whole number', 400));
+      }
+    }
+    const conflict = await findIdentityConflict(updates, team._id);
+    if (conflict) return next(conflict);
 
-    const updated = await store.updateTeam(req.params.id, updates);
-    if (!updated) {
-      return next(new AppError('Team not found', 404));
+    if (Object.keys(updates).length > 0) {
+      await store.updateTeam(req.params.id, updates);
+    }
+    // Score fields go through the same validation as the score endpoint
+    let updated = await store.getTeamById(req.params.id);
+    if (req.body.score !== undefined || req.body.roundScores !== undefined) {
+      updated = await applyManualScore(req.params.id, { score: req.body.score, roundScores: req.body.roundScores });
+    }
+
+    const allTeams = await store.getTeams();
+    if (req.io) {
+      broadcast(req.io, 'leaderboard:update', allTeams);
     }
 
     res.status(200).json({
       success: true,
       data: forAdmin(updated)
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Manual score correction (add/subtract points, or overwrite round scores)
+ * PUT /api/v1/teams/:id/score
+ * POST /api/v1/teams/:id/adjust-score
+ */
+async function updateTeamScore(req, res, next) {
+  try {
+    const updated = await applyManualScore(req.params.id, req.body);
+
+    const allTeams = await store.getTeams();
+    if (req.io) {
+      broadcast(req.io, 'leaderboard:update', allTeams);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Team score updated successfully',
+      data: forAdmin(updated),
+      teams: forAdmin(allTeams)
     });
   } catch (err) {
     next(err);
@@ -169,6 +237,7 @@ module.exports = {
   getTeams,
   createTeam,
   updateTeam,
+  updateTeamScore,
   deleteTeam,
   resetTeamSession,
   resetScores

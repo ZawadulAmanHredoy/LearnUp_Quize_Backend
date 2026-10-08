@@ -77,7 +77,7 @@ before(async () => {
   const { json } = await api('/auth/admin/login', {
     method: 'POST',
     token: null,
-    body: { username: 'admin', password: 'admin123' }
+    body: { username: process.env.ADMIN_USERNAME || 'admin', password: process.env.ADMIN_PASSWORD || 'admin123' }
   });
   adminToken = json.data.token;
 });

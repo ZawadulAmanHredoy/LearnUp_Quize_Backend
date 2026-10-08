@@ -25,7 +25,7 @@ cp .env.example .env
 | Variable | Purpose |
 | :--- | :--- |
 | `MONGODB_URI` | MongoDB connection. If unreachable, the server runs on an in-memory store (state is lost on restart). |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Admin account created on first start when no admin exists. **Set the password before the event**; the fallback is `admin` / `admin123`. |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Admin login. When `ADMIN_PASSWORD` is set, the account is created or its password reset to match on every start. **Set it before the event**; without it the first-start fallback is `admin` / `admin123`. |
 | `JWT_SECRET` | Token signing secret. If empty, one is generated into `.jwt-secret` (git-ignored) and reused across restarts. |
 | `MAX_UPLOAD_MB` | Largest media upload in MB (default 200). |
 | `MEDIA_CACHE_DIR` | Where the server keeps its local copy of uploaded media (default `media-cache/`). |
@@ -62,9 +62,10 @@ Questions and media are managed from the admin website (**Questions Bank** in th
 
 ## API Endpoints (`/api/v1`)
 - `GET /health` — server, database and LAN addresses (used for the join QR code)
-- `POST /auth/admin/login`, `POST /auth/team/login`, `POST /auth/team/logout`, `GET /auth/me`
-- `GET /teams` (public: names and scores; admin: includes PINs), `POST /teams`, `PUT /teams/:id`, `DELETE /teams/:id`, `POST /teams/:id/reset-session`, `POST /teams/reset-scores` — admin
-- `GET|POST /questions`, `POST /questions/bulk`, `PUT /questions/reorder`, `GET /questions/export`, `GET|PUT|DELETE /questions/:id` — admin
+- `POST /auth/admin/login`, `POST /auth/team/login` (`{ teamId | teamNumber, pin }`; Team ID is case-insensitive), `POST /auth/team/logout`, `GET /auth/me`
+- `GET /teams` (public: names and scores; admin: includes PINs), `POST /teams`, `PUT /teams/:id`, `DELETE /teams/:id`, `POST /teams/:id/reset-session`, `POST /teams/reset-scores` — admin. Teams have `teamName`, `teamNumber`, `teamId` (default `T-<nn>`), `institution`, `teamLead`, `pin`; number and Team ID must be unique
+- `PUT /teams/:id/score` / `POST /teams/:id/adjust-score` — admin score correction: `{ delta, roundType }` adds points, `{ roundScores }` overwrites rounds (total follows), `{ score }` overwrites the total
+- `GET|POST /questions`, `POST /questions/bulk`, `PUT /questions/reorder`, `GET /questions/export`, `GET|PUT|DELETE /questions/:id`, `DELETE /questions/round/:roundType` (refused while that round is on stage) — admin
 - `GET|POST /media` (multipart field `file`), `GET /media/manifest`, `DELETE /media/:id` — admin
 - `GET /media/:id` (outside `/api`) — streams a clip with range support; public so the projector can play it
 - `GET /event/state`, `POST /event/reset`, `POST /event/seed` — admin
@@ -72,7 +73,7 @@ Questions and media are managed from the admin website (**Questions Bank** in th
 ## Socket.IO Events
 Clients first emit `join:room` with `{ role: 'admin' | 'projector' | 'team', token }` and receive a `state:sync` snapshot.
 
-- **Admin → server:** `admin:set-stage`, `admin:set-break`, `admin:end-break`, `admin:load-question`, `admin:show-question` (AV: reveal after media), `admin:reveal-option`, `admin:start-countdown`, `admin:lock-answer`, `admin:evaluate` (`{ isCorrect }`; points come from the question), `admin:media-control` (`play`/`pause`/`replay`/`seek`/`mute`/`unmute`), `admin:set-active-team`, `admin:open-buzzer` / `admin:close-buzzer` / `admin:reset-buzzer`, `admin:rapid-fire-start` / `-action` / `-stop`, `admin:announce-winner`
+- **Admin → server:** `admin:set-stage` (switching to a round puts its first question on stage), `admin:update-welcome` (`{ welcomeConfig: { title, subtitle, badgeText, showQr, showTeams } }`), `admin:update-team-score` (`{ teamId, ... }`, same body as the score endpoint), `admin:set-break`, `admin:end-break`, `admin:load-question`, `admin:show-question` (shows the question text; options are then revealed one by one), `admin:reveal-option`, `admin:start-countdown`, `admin:lock-answer`, `admin:evaluate` (`{ isCorrect }`; points come from the question), `admin:media-control` (`play`/`pause`/`replay`/`seek`/`mute`/`unmute`), `admin:set-active-team`, `admin:open-buzzer` / `admin:close-buzzer` / `admin:reset-buzzer`, `admin:rapid-fire-start` / `-action` / `-stop`, `admin:announce-winner`
 - **Team → server:** `team:buzz`, `ping:measure`
 - **Media sync:** admin `admin:media-preload` (`{ force }`) → projectors get `media:preload`; projectors report `projector:media-status` → admins get `media:projector-status`; admins and projectors get `media:manifest` on join and whenever the bank changes; admins get `questions:updated`
-- **Server → clients:** `stage:updated`, `break:started`, `break:ended`, `question:presented`, `question:shown`, `options:updated`, `countdown:tick`, `buzzer:status`, `buzzer:unlocked`, `buzzer:winner`, `buzzer:confirmed`, `buzzer:rejected`, `buzzer:reset`, `answer:locked`, `answer:evaluated`, `media:sync`, `turn:updated`, `rapid-fire:started` / `tick` / `update` / `times-up`, `leaderboard:update`, `winner:celebration` (`{ champion, isTie, tiedTeams, standings }`), `radar:status`, `admin:notice`, `auth:error`, `auth:session_replaced`, `auth:session_revoked`
+- **Server → clients:** `stage:updated` / `stage:changed`, `welcome:updated`, `break:started`, `break:ended`, `question:presented`, `question:shown`, `options:updated`, `countdown:tick`, `buzzer:status`, `buzzer:unlocked`, `buzzer:winner`, `buzzer:confirmed`, `buzzer:rejected`, `buzzer:reset`, `answer:locked`, `answer:evaluated`, `media:sync`, `turn:updated`, `rapid-fire:started` / `tick` / `update` / `times-up`, `leaderboard:update`, `winner:celebration` (`{ champion, isTie, tiedTeams, standings }`), `radar:status`, `admin:notice`, `auth:error`, `auth:session_replaced`, `auth:session_revoked`

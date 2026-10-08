@@ -13,6 +13,7 @@ router.post('/', requirePersistentStore, questionController.createQuestion);
 router.post('/bulk', requirePersistentStore, questionController.bulkCreateQuestions);
 router.put('/reorder', requirePersistentStore, questionController.reorderQuestions);
 router.get('/:id', questionController.getQuestionById);
+router.delete('/round/:roundType', requirePersistentStore, questionController.deleteQuestionsByRound);
 router.put('/:id', requirePersistentStore, questionController.updateQuestion);
 router.delete('/:id', requirePersistentStore, questionController.deleteQuestion);
 

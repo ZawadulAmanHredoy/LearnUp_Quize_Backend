@@ -1,6 +1,7 @@
 const store = require('../utils/store');
 const { broadcast } = require('./broadcast');
 const { openBuzzer, resetBuzzer } = require('./buzzerHandler');
+const { applyManualScore } = require('../utils/teamScores');
 
 const STAGES = [
   'PRE_EVENT',
@@ -14,6 +15,7 @@ const STAGES = [
 ];
 const BREAK_TYPES = ['PRAYER', 'LUNCH', 'INTERMISSION', 'CUSTOM'];
 const MEDIA_ACTIONS = ['play', 'pause', 'replay', 'seek', 'mute', 'unmute'];
+const WELCOME_TEXT_FIELDS = { title: 120, subtitle: 400, badgeText: 60 };
 
 let countdownInterval = null;
 
@@ -66,12 +68,64 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
     clearCountdown();
     resetBuzzer(io);
 
-    const updatedState = await store.updateEventState({ currentStage: stage });
-    broadcast(io, 'stage:updated', { stage, metadata, state: updatedState });
+    const STAGE_TO_ROUND_TYPE = {
+      ROUND_BUZZER: 'BUZZER',
+      ROUND_AV: 'AUDIO_VISUAL',
+      ROUND_RAPID_FIRE: 'RAPID_FIRE'
+    };
+
+    const targetRoundType = STAGE_TO_ROUND_TYPE[stage];
+    let updates = { currentStage: stage };
+
+    if (targetRoundType) {
+      const currentState = await store.getEventState();
+      const currentQ = currentState.activeQuestionId
+        ? await store.getQuestionById(currentState.activeQuestionId)
+        : null;
+
+      // Auto-align with valid round question if current activeQuestion belongs to another round
+      if (!currentQ || currentQ.roundType !== targetRoundType) {
+        const roundQuestions = await store.getQuestions({ roundType: targetRoundType });
+        if (roundQuestions.length > 0) {
+          const firstQ = roundQuestions[0];
+          const isMediaFirst = firstQ.roundType === 'AUDIO_VISUAL';
+          updates.activeQuestionId = firstQ._id;
+          updates.currentQuestionIndex = 0;
+          updates.questionSubState = freshQuestionSubState({ isQuestionVisible: !isMediaFirst });
+        }
+      }
+    }
+
+    const updatedState = await store.updateEventState(updates);
+    const activeQuestion = updatedState.activeQuestionId
+      ? await store.getQuestionById(updatedState.activeQuestionId)
+      : null;
+
+    broadcast(io, 'stage:updated', { stage, metadata, state: updatedState, activeQuestion });
+    broadcast(io, 'stage:changed', { stage, metadata, state: updatedState, activeQuestion });
+  });
+
+  // 1b. WELCOME SCREEN CONFIGURATION
+  onAdmin('admin:update-welcome', async ({ welcomeConfig } = {}) => {
+    if (!welcomeConfig || typeof welcomeConfig !== 'object') {
+      notice('Invalid welcome configuration');
+      return;
+    }
+    // Only known fields, with sane lengths, reach the projector
+    const clean = {};
+    for (const [key, maxLength] of Object.entries(WELCOME_TEXT_FIELDS)) {
+      if (typeof welcomeConfig[key] === 'string') clean[key] = welcomeConfig[key].slice(0, maxLength);
+    }
+    for (const key of ['showQr', 'showTeams']) {
+      if (welcomeConfig[key] !== undefined) clean[key] = Boolean(welcomeConfig[key]);
+    }
+    const updatedState = await store.updateEventState({ welcomeConfig: clean });
+    broadcast(io, 'welcome:updated', updatedState.welcomeConfig);
+    broadcast(io, 'stage:updated', { stage: updatedState.currentStage, state: updatedState });
   });
 
   // 2. BREAK SCREENS
-  onAdmin('admin:set-break', async ({ breakType = 'INTERMISSION', durationMinutes = 15, message } = {}) => {
+  onAdmin('admin:set-break', async ({ breakType = 'INTERMISSION', message } = {}) => {
     const type = BREAK_TYPES.includes(breakType) ? breakType : 'INTERMISSION';
     const breakMessages = {
       PRAYER: 'Prayer Break — We will resume in a short while.',
@@ -84,7 +138,7 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
       type,
       message: (typeof message === 'string' && message.trim()) || breakMessages[type],
       startedAt: new Date(),
-      durationMinutes: Math.min(Math.max(Number(durationMinutes) || 15, 1), 240)
+      durationMinutes: null
     };
 
     clearCountdown();
@@ -103,6 +157,7 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
     const updatedState = await store.updateEventState({ currentStage: stage });
 
     broadcast(io, 'stage:updated', { stage, state: updatedState });
+    broadcast(io, 'stage:changed', { stage, state: updatedState });
     broadcast(io, 'break:ended', { nextStage: stage });
   });
 
@@ -121,22 +176,30 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
 
     const isMediaFirst = question.roundType === 'AUDIO_VISUAL';
     const questionSubState = freshQuestionSubState({ isQuestionVisible: !isMediaFirst });
+    const mediaSubState = {
+      isPlaying: false,
+      action: 'pause',
+      currentTime: 0,
+      lastUpdated: Date.now()
+    };
 
     await store.updateEventState({
       activeQuestionId: question._id,
       currentQuestionIndex: Number.isInteger(questionIndex) ? questionIndex : 0,
-      questionSubState
+      questionSubState,
+      mediaSubState
     });
 
     broadcast(io, 'question:presented', {
       questionId: question._id,
       questionIndex,
       question,
-      questionSubState
+      questionSubState,
+      mediaSubState
     });
   });
 
-  // 3b. SHOW QUESTION & OPTIONS (after AV media has played)
+  // 3b. SHOW QUESTION (Options remain hidden until admin reveals them one by one)
   onAdmin('admin:show-question', async () => {
     const state = await store.getEventState();
     const question = await store.getQuestionById(state.activeQuestionId);
@@ -145,17 +208,16 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
       return;
     }
 
-    const revealed = (question.options || []).map((_, idx) => idx);
     const updatedState = await store.updateEventState({
       questionSubState: {
         isQuestionVisible: true,
-        revealedOptions: revealed,
-        areAllOptionsVisible: true
+        revealedOptions: [],
+        areAllOptionsVisible: false
       }
     });
 
     broadcast(io, 'question:shown', { questionSubState: updatedState.questionSubState });
-    broadcast(io, 'options:updated', { revealedIndices: revealed, allRevealed: true });
+    broadcast(io, 'options:updated', { revealedIndices: [], allRevealed: false });
   });
 
   // 4. REVEAL OPTION(S)
@@ -336,12 +398,22 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
   });
 
   // 8. AUDIO-VISUAL REMOTE PLAYBACK CONTROLS
-  onAdmin('admin:media-control', ({ action, time = 0 } = {}) => {
+  onAdmin('admin:media-control', async ({ action, time = 0 } = {}) => {
     if (!MEDIA_ACTIONS.includes(action)) {
       notice(`Unknown media action: ${action}`);
       return;
     }
-    broadcast(io, 'media:sync', { action, time: Number(time) || 0, timestamp: Date.now() });
+    // mute/unmute/seek don't change whether the clip is playing
+    const wasPlaying = Boolean(store.peekEventState().mediaSubState?.isPlaying);
+    const isPlaying = action === 'play' || action === 'replay' ? true : action === 'pause' ? false : wasPlaying;
+    const mediaSubState = {
+      isPlaying,
+      action,
+      currentTime: Number(time) || 0,
+      lastUpdated: Date.now()
+    };
+    await store.updateEventState({ mediaSubState });
+    broadcast(io, 'media:sync', { action, time: Number(time) || 0, timestamp: Date.now(), mediaSubState });
   });
 
   // 9. SET ACTIVE TEAM TURN (for AV turn rotation)
@@ -365,6 +437,17 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
 
     broadcast(io, 'stage:updated', { stage: 'FINAL_WINNER', state: updatedState });
     broadcast(io, 'winner:celebration', result);
+  });
+
+  // 11. MANUAL SCORE CORRECTION
+  onAdmin('admin:update-team-score', async ({ teamId, ...change } = {}) => {
+    try {
+      const updated = await applyManualScore(teamId, change);
+      broadcast(io, 'leaderboard:update', await store.getTeams());
+      notice(`Score updated for ${updated?.teamName || 'team'}`);
+    } catch (err) {
+      notice(`Failed to update score: ${err.message}`);
+    }
   });
 }
 

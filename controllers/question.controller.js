@@ -186,12 +186,40 @@ async function exportQuestions(req, res, next) {
   }
 }
 
+/**
+ * Delete every question in one round (refused while one of them is on stage)
+ * DELETE /api/v1/questions/round/:roundType
+ */
+async function deleteQuestionsByRound(req, res, next) {
+  try {
+    const roundType = String(req.params.roundType || '').toUpperCase();
+    if (!ROUND_TYPES.includes(roundType)) {
+      return next(new AppError(`roundType must be one of ${ROUND_TYPES.join(', ')}`, 400));
+    }
+
+    const state = store.peekEventState();
+    if (state.activeQuestionId && state.currentStage !== 'WELCOME') {
+      const live = await store.getQuestionById(state.activeQuestionId);
+      if (live && live.roundType === roundType) {
+        return next(new AppError('A question from this round is on stage right now. Load another round before deleting it.', 409));
+      }
+    }
+
+    const deleted = await store.deleteQuestionsByRound(roundType);
+    await announceChange(req);
+    res.status(200).json({ success: true, count: deleted, message: `Deleted ${deleted} ${roundType} question(s)` });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getQuestions,
   getQuestionById,
   createQuestion,
   updateQuestion,
   deleteQuestion,
+  deleteQuestionsByRound,
   reorderQuestions,
   bulkCreateQuestions,
   exportQuestions

@@ -27,7 +27,6 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
-
 // CORS: teams' phones reach the frontend via the host laptop's LAN IP
 // (e.g. http://192.168.1.100:5173), which isn't known ahead of time.
 // Auth uses bearer tokens, not cookies, so allowing any origin is safe.

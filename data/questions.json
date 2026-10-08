@@ -95,6 +95,101 @@
     "explanation": "The Event Loop continuously checks if the call stack is empty before pushing queued callbacks."
   },
   {
+    "_id": "q_buzzer_6",
+    "roundType": "BUZZER",
+    "order": 6,
+    "questionText": "Which HTTP security response header prevents clickjacking attacks by controlling whether a site can be framed?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "X-Frame-Options" },
+      { "label": "B", "text": "X-XSS-Protection" },
+      { "label": "C", "text": "Content-Length" },
+      { "label": "D", "text": "Access-Control-Allow-Origin" }
+    ],
+    "correctOptionIndex": 0,
+    "points": 10,
+    "negativePoints": 5,
+    "timeLimitSeconds": 30,
+    "explanation": "X-Frame-Options (or CSP frame-ancestors) prevents the page from being embedded in iframes, defending against clickjacking."
+  },
+  {
+    "_id": "q_buzzer_7",
+    "roundType": "BUZZER",
+    "order": 7,
+    "questionText": "In Node.js, which global object provides control and diagnostic information about the running application process?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "window" },
+      { "label": "B", "text": "process" },
+      { "label": "C", "text": "system" },
+      { "label": "D", "text": "runtime" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 10,
+    "negativePoints": 5,
+    "timeLimitSeconds": 30,
+    "explanation": "The process object provides env variables, uptime, memory usage, and lifecycle event hooks."
+  },
+  {
+    "_id": "q_buzzer_8",
+    "roundType": "BUZZER",
+    "order": 8,
+    "questionText": "Which Git command records staged snapshots to the repository history with an inline commit message?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "git add -A" },
+      { "label": "B", "text": "git commit -m" },
+      { "label": "C", "text": "git push -u" },
+      { "label": "D", "text": "git snapshot" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 10,
+    "negativePoints": 5,
+    "timeLimitSeconds": 30,
+    "explanation": "git commit -m records staged changes with a commit message."
+  },
+  {
+    "_id": "q_buzzer_9",
+    "roundType": "BUZZER",
+    "order": 9,
+    "questionText": "Which cryptographic hash function produces a 256-bit digest widely utilized in blockchain hashing and TLS encryption?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "MD5" },
+      { "label": "B", "text": "SHA-1" },
+      { "label": "C", "text": "SHA-256" },
+      { "label": "D", "text": "DES-56" }
+    ],
+    "correctOptionIndex": 2,
+    "points": 10,
+    "negativePoints": 5,
+    "timeLimitSeconds": 30,
+    "explanation": "SHA-256 is a member of the SHA-2 family producing a 256-bit cryptographic digest."
+  },
+  {
+    "_id": "q_buzzer_10",
+    "roundType": "BUZZER",
+    "order": 10,
+    "questionText": "In CSS Flexbox layout, which property specifies the initial main size of a flex item before free space is distributed?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "flex-basis" },
+      { "label": "B", "text": "flex-grow" },
+      { "label": "C", "text": "flex-shrink" },
+      { "label": "D", "text": "align-self" }
+    ],
+    "correctOptionIndex": 0,
+    "points": 10,
+    "negativePoints": 5,
+    "timeLimitSeconds": 30,
+    "explanation": "flex-basis defines the initial size of a flex element before growing or shrinking."
+  },
+  {
     "_id": "q_av_1",
     "roundType": "AUDIO_VISUAL",
     "order": 1,
@@ -131,6 +226,158 @@
     "negativePoints": 0,
     "timeLimitSeconds": 45,
     "explanation": "Robert Tappan Morris released the Morris worm on November 2, 1988."
+  },
+  {
+    "_id": "q_av_3",
+    "roundType": "AUDIO_VISUAL",
+    "order": 3,
+    "questionText": "Listen to the vintage synth tone: Which legendary sound synthesizer chip powered the 1982 Commodore 64 home computer?",
+    "mediaType": "AUDIO",
+    "mediaUrl": "/media/retro_beeps.mp3",
+    "options": [
+      { "label": "A", "text": "Yamaha YM2612" },
+      { "label": "B", "text": "MOS Technology SID 6581" },
+      { "label": "C", "text": "Texas Instruments SN76489" },
+      { "label": "D", "text": "Sound Blaster 16" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 15,
+    "negativePoints": 0,
+    "timeLimitSeconds": 45,
+    "explanation": "The SID 6581 chip designed by Bob Yannes provided 3 independent audio voices and filters."
+  },
+  {
+    "_id": "q_av_4",
+    "roundType": "AUDIO_VISUAL",
+    "order": 4,
+    "questionText": "Watch the computing milestone presentation: What was the name of the first experimental personal workstation developed at Xerox PARC in 1973?",
+    "mediaType": "VIDEO",
+    "mediaUrl": "/media/tech_history.mp4",
+    "options": [
+      { "label": "A", "text": "Apple Lisa" },
+      { "label": "B", "text": "Xerox Alto" },
+      { "label": "C", "text": "IBM PC 5150" },
+      { "label": "D", "text": "Altair 8800" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 15,
+    "negativePoints": 0,
+    "timeLimitSeconds": 45,
+    "explanation": "The Xerox Alto pioneered the graphical user interface, bitmap display, mouse, and Ethernet networking."
+  },
+  {
+    "_id": "q_av_5",
+    "roundType": "AUDIO_VISUAL",
+    "order": 5,
+    "questionText": "Listen to the transmission frequencies: What standard communication device converted digital computer signals to audible analog telephone tones?",
+    "mediaType": "AUDIO",
+    "mediaUrl": "/media/retro_beeps.mp3",
+    "options": [
+      { "label": "A", "text": "Dial-up Acoustic Modem" },
+      { "label": "B", "text": "Ethernet Hub" },
+      { "label": "C", "text": "Optical Splitter" },
+      { "label": "D", "text": "Bluetooth Dongle" }
+    ],
+    "correctOptionIndex": 0,
+    "points": 15,
+    "negativePoints": 0,
+    "timeLimitSeconds": 45,
+    "explanation": "A modem (modulator-demodulator) converted digital binary pulses into audible audio frequencies for phone lines."
+  },
+  {
+    "_id": "q_av_6",
+    "roundType": "AUDIO_VISUAL",
+    "order": 6,
+    "questionText": "Watch the video excerpt: In 1984, which iconic computer was introduced with the landmark dystopian television commercial directed by Ridley Scott?",
+    "mediaType": "VIDEO",
+    "mediaUrl": "/media/tech_history.mp4",
+    "options": [
+      { "label": "A", "text": "Commodore Amiga" },
+      { "label": "B", "text": "Apple Macintosh" },
+      { "label": "C", "text": "Atari ST" },
+      { "label": "D", "text": "Sinclair ZX Spectrum" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 15,
+    "negativePoints": 0,
+    "timeLimitSeconds": 45,
+    "explanation": "Apple broadcast the famous 1984 commercial during Super Bowl XVIII to launch the original Macintosh."
+  },
+  {
+    "_id": "q_av_7",
+    "roundType": "AUDIO_VISUAL",
+    "order": 7,
+    "questionText": "Listen to the acoustic tone: What is the recognized standard audio sampling frequency used for commercial CD-DA (Compact Disc Digital Audio)?",
+    "mediaType": "AUDIO",
+    "mediaUrl": "/media/retro_beeps.mp3",
+    "options": [
+      { "label": "A", "text": "22.05 kHz" },
+      { "label": "B", "text": "44.1 kHz" },
+      { "label": "C", "text": "48.0 kHz" },
+      { "label": "D", "text": "96.0 kHz" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 15,
+    "negativePoints": 0,
+    "timeLimitSeconds": 45,
+    "explanation": "Red Book CD standard specifies 44.1 kHz 16-bit stereo audio."
+  },
+  {
+    "_id": "q_av_8",
+    "roundType": "AUDIO_VISUAL",
+    "order": 8,
+    "questionText": "Watch the archival footage: In which Swiss research laboratory did Sir Tim Berners-Lee invent the World Wide Web in 1989?",
+    "mediaType": "VIDEO",
+    "mediaUrl": "/media/tech_history.mp4",
+    "options": [
+      { "label": "A", "text": "Bell Labs" },
+      { "label": "B", "text": "CERN" },
+      { "label": "C", "text": "DARPA" },
+      { "label": "D", "text": "Max Planck Institute" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 15,
+    "negativePoints": 0,
+    "timeLimitSeconds": 45,
+    "explanation": "Tim Berners-Lee invented HTML, HTTP, and the World Wide Web while working at CERN in Geneva."
+  },
+  {
+    "_id": "q_av_9",
+    "roundType": "AUDIO_VISUAL",
+    "order": 9,
+    "questionText": "Listen to the pulse sequence: What standard musical interface protocol was standardized in 1983 to let digital instruments and computers communicate?",
+    "mediaType": "AUDIO",
+    "mediaUrl": "/media/retro_beeps.mp3",
+    "options": [
+      { "label": "A", "text": "MIDI (Musical Instrument Digital Interface)" },
+      { "label": "B", "text": "ASIO Sound Driver" },
+      { "label": "C", "text": "S/PDIF Optical" },
+      { "label": "D", "text": "Open Sound Control" }
+    ],
+    "correctOptionIndex": 0,
+    "points": 15,
+    "negativePoints": 0,
+    "timeLimitSeconds": 45,
+    "explanation": "MIDI was published in 1983 by Dave Smith and Chet Wood, standardizing digital music hardware."
+  },
+  {
+    "_id": "q_av_10",
+    "roundType": "AUDIO_VISUAL",
+    "order": 10,
+    "questionText": "Watch the presentation clip: What historic 90-minute computer demonstration by Douglas Engelbart in December 1968 was later nicknamed 'The Mother of All Demos'?",
+    "mediaType": "VIDEO",
+    "mediaUrl": "/media/tech_history.mp4",
+    "options": [
+      { "label": "A", "text": "The Turing Machine Demonstration" },
+      { "label": "B", "text": "The NLS (oN-Line System) Demonstration" },
+      { "label": "C", "text": "The ENIAC Public Unveiling" },
+      { "label": "D", "text": "The Xerox Star Debut" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 15,
+    "negativePoints": 0,
+    "timeLimitSeconds": 45,
+    "explanation": "Engelbart demonstrated the computer mouse, video conferencing, teleconferencing, hypertext, and collaborative real-time editing."
   },
   {
     "_id": "q_rf_1",
@@ -263,6 +510,63 @@
     "points": 1,
     "negativePoints": 0,
     "timeLimitSeconds": 10,
-    "explanation": "V8 is Google's open source high-performance JavaScript and WebAssembly engine."
+    "explanation": "V8 is Google's open source high-performance JavaScript engine."
+  },
+  {
+    "_id": "q_rf_8",
+    "roundType": "RAPID_FIRE",
+    "order": 8,
+    "questionText": "Which keyword in modern JavaScript declares a block-scoped, reassignable variable?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "var" },
+      { "label": "B", "text": "const" },
+      { "label": "C", "text": "let" },
+      { "label": "D", "text": "def" }
+    ],
+    "correctOptionIndex": 2,
+    "points": 1,
+    "negativePoints": 0,
+    "timeLimitSeconds": 10,
+    "explanation": "let declares block-scoped variables that can be reassigned."
+  },
+  {
+    "_id": "q_rf_9",
+    "roundType": "RAPID_FIRE",
+    "order": 9,
+    "questionText": "What does SQL stand for in relational database management?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "Structured Query Language" },
+      { "label": "B", "text": "Standard Question Logic" },
+      { "label": "C", "text": "Sequential Query Link" },
+      { "label": "D", "text": "Schema Queue Layer" }
+    ],
+    "correctOptionIndex": 0,
+    "points": 1,
+    "negativePoints": 0,
+    "timeLimitSeconds": 10,
+    "explanation": "Structured Query Language is the domain-specific language for managing RDBMS data."
+  },
+  {
+    "_id": "q_rf_10",
+    "roundType": "RAPID_FIRE",
+    "order": 10,
+    "questionText": "Which transport layer protocol is connectionless and prioritizes speed without delivery guarantees?",
+    "mediaType": "NONE",
+    "mediaUrl": null,
+    "options": [
+      { "label": "A", "text": "TCP" },
+      { "label": "B", "text": "UDP" },
+      { "label": "C", "text": "TLS" },
+      { "label": "D", "text": "HTTP" }
+    ],
+    "correctOptionIndex": 1,
+    "points": 1,
+    "negativePoints": 0,
+    "timeLimitSeconds": 10,
+    "explanation": "UDP (User Datagram Protocol) is lightweight, connectionless, and ideal for gaming and streaming."
   }
 ]

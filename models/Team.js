@@ -11,6 +11,18 @@ const TeamSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
+  teamId: {
+    type: String,
+    default: ''
+  },
+  institution: {
+    type: String,
+    default: ''
+  },
+  teamLead: {
+    type: String,
+    default: ''
+  },
   pin: {
     type: String,
     required: true
