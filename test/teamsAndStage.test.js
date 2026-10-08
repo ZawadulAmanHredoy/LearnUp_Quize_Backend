@@ -200,3 +200,27 @@ test('a whole round can be deleted, but not while it is on stage', async () => {
   assert.equal((await api('/questions?round=RAPID_FIRE')).json.count, 0);
   assert.ok((await api('/questions?round=BUZZER')).json.count > 0, 'other rounds are untouched');
 });
+
+test("the admin's embedded stage preview is not counted as a projector", async () => {
+  const admin = await joinAdmin();
+  const join = async (preview) => {
+    const socket = ioClient(baseUrl, { transports: ['websocket'], forceNew: true, reconnection: false });
+    openSockets.push(socket);
+    await once(socket, 'connect');
+    const radar = once(admin, 'radar:status');
+    socket.emit('join:room', { role: 'projector', preview });
+    return { socket, radar: await radar };
+  };
+
+  const preview = await join(true);
+  assert.equal(preview.radar.isProjectorConnected, false);
+
+  // A preview's download progress is ignored
+  const noStatus = once(admin, 'media:projector-status', 500).then(() => 'sent', () => 'none');
+  preview.socket.emit('projector:media-status', { ready: 1, total: 1, items: {} });
+  assert.equal(await noStatus, 'none');
+
+  const real = await join(false);
+  assert.equal(real.radar.isProjectorConnected, true);
+  real.socket.disconnect();
+});

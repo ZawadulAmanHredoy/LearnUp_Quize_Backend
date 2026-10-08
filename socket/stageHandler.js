@@ -102,7 +102,6 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
       : null;
 
     broadcast(io, 'stage:updated', { stage, metadata, state: updatedState, activeQuestion });
-    broadcast(io, 'stage:changed', { stage, metadata, state: updatedState, activeQuestion });
   });
 
   // 1b. WELCOME SCREEN CONFIGURATION
@@ -157,7 +156,6 @@ function registerStageHandlers(socket, io, { onAdmin, notice }) {
     const updatedState = await store.updateEventState({ currentStage: stage });
 
     broadcast(io, 'stage:updated', { stage, state: updatedState });
-    broadcast(io, 'stage:changed', { stage, state: updatedState });
     broadcast(io, 'break:ended', { nextStage: stage });
   });
 

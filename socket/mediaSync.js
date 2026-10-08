@@ -72,7 +72,7 @@ function registerMediaSyncHandlers(socket, io, { onAdmin }) {
   });
 
   socket.on('projector:media-status', (data) => {
-    if (socket.data.role !== 'projector') return;
+    if (socket.data.role !== 'projector' || socket.data.isPreview) return;
     projectorStatuses.set(socket.id, sanitizeStatus(data));
     emitProjectorStatuses(io);
   });

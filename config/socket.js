@@ -134,7 +134,7 @@ function initSocket(server, { corsOrigin = true } = {}) {
     };
 
     // 1. Role-based Room Joining & Presence
-    socket.on('join:room', async ({ role, token } = {}) => {
+    socket.on('join:room', async ({ role, token, preview = false } = {}) => {
       try {
         leaveRoleRooms(socket);
 
@@ -149,8 +149,11 @@ function initSocket(server, { corsOrigin = true } = {}) {
           activeConnections.admins.add(socket.id);
         } else if (role === 'projector') {
           socket.data.role = 'projector';
+          // The admin dashboard's embedded stage preview gets the same events
+          // but is not a real projector: it must not show as connected
+          socket.data.isPreview = Boolean(preview);
           socket.join(ROOMS.projector);
-          activeConnections.projectors.add(socket.id);
+          if (!socket.data.isPreview) activeConnections.projectors.add(socket.id);
         } else if (role === 'team') {
           const { team, error } = await authenticateTeam(token);
           if (error) {
